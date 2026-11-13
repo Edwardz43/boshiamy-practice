@@ -1,0 +1,32 @@
+{
+  "name": "無蝦米練功房",
+  "short_name": "無蝦米",
+  "description": "嘸蝦米輸入法練習：字根、常用字與限時挑戰，可離線使用。",
+  "lang": "zh-Hant-TW",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1c4b3a",
+  "theme_color": "#1c4b3a",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
