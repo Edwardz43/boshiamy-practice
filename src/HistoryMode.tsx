@@ -37,6 +37,7 @@ const FILTERS: { v: Filter; label: string }[] = [
   { v: "all", label: "全部" },
   { v: "roots", label: "字根" },
   { v: "chars", label: "常用字" },
+  { v: "short", label: "簡碼" },
   { v: "timed", label: "限時" },
   { v: "article", label: "文章" },
 ];

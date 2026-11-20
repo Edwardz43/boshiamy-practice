@@ -26,6 +26,18 @@ import {
   sanitizeStats,
   saveHistoryToStorage,
 } from "./historyLogic";
+import {
+  SHORT_TIERS,
+  type ShortGradeResult,
+  type ShortTier,
+  filterShortPool,
+  fullCodesOf,
+  gradeShortAnswer,
+  isShortCodeChar,
+  shortCodesOf,
+  shortHintText,
+  shortTierTitle,
+} from "./shortLogic";
 
 // 文章練習 is split into its own chunk; its code table (liu-table.json) loads only when the mode opens.
 const ArticleMode = lazy(() => import("./ArticleMode"));
@@ -87,7 +99,7 @@ type RootItem = {
   memo: string;
 };
 
-type Mode = "roots" | "chars" | "timed" | "article" | "lookup" | "history";
+type Mode = "roots" | "chars" | "short" | "timed" | "article" | "lookup" | "history";
 type RootDir = "forward" | "reverse";
 type Diff = 100 | 300 | 600 | 1000;
 const DIFFS: { v: Diff; key: string; code: string }[] = [
@@ -325,13 +337,6 @@ function fmtCodes(codes: string[]): string {
   return codes.map(up).join("／");
 }
 
-function hasJian(item: CharItem): boolean {
-  const shorts = item.k.filter((x) => x.length <= 2);
-  const longs = item.k.filter((x) => x.length >= 3);
-  if (shorts.length === 0) return false;
-  if (longs.length > 0) return true;
-  return shorts[0].length === 1 && item.k.length > 1;
-}
 
 function hintOf(item: CharItem): string {
   const minL = Math.min(...item.k.map((x) => x.length));
@@ -480,11 +485,13 @@ function Pill(props: {
   on: boolean;
   onClick: () => void;
   disabled?: boolean;
+  testId?: string;
 }): JSX.Element {
   const theme = useGrokTheme();
   return (
     <button
       type="button"
+      data-testid={props.testId}
       onClick={props.onClick}
       disabled={props.disabled}
       style={{
@@ -598,6 +605,45 @@ function KeyboardChart(): JSX.Element {
   );
 }
 
+function ShortCodeChart(props: { items: CharItem[]; tier: ShortTier }): JSX.Element {
+  const theme = useGrokTheme();
+  const sorted = useMemo(() => {
+    const list = props.items.slice();
+    if (props.tier === "one") {
+      list.sort((a, b) => (shortCodesOf(a)[0] ?? "").localeCompare(shortCodesOf(b)[0] ?? "") || a.r - b.r);
+    }
+    return list;
+  }, [props.items, props.tier]);
+  return (
+    <div data-testid="short-table" style={{ display: "flex", flexDirection: "column", gap: 10, width: "100%", minWidth: 0 }}>
+      <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0 }}>
+        {shortTierTitle(props.tier, sorted.length)} · 粗體為簡碼，下方為全碼
+      </p>
+      <div className="short-table-scroll">
+        <div className="short-table-grid">
+          {sorted.map((item) => {
+            const sc = shortCodesOf(item).map(up).join("／");
+            const fc = fullCodesOf(item).map(up).join("／");
+            return (
+              <div
+                key={item.c}
+                className="short-table-card"
+                style={{ borderColor: theme.border.default, background: theme.bg.base }}
+              >
+                <div className="short-table-char">{item.c}</div>
+                <div className="short-table-code" style={{ color: theme.text.accent }}>{sc}</div>
+                {fc ? (
+                  <div className="short-table-full" style={{ color: theme.text.secondary }}>{fc}</div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App(): JSX.Element {
   const theme = useGrokTheme();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -606,8 +652,10 @@ export default function App(): JSX.Element {
   const [mode, setMode] = useState<Mode>("roots");
   const [rootDir, setRootDir] = useState<RootDir>("forward");
   const [diff, setDiff] = useState<Diff>(100);
+  const [shortTier, setShortTier] = useState<ShortTier>("one");
   const [review, setReview] = useState<boolean>(false);
   const [showKb, setShowKb] = useState<boolean>(false);
+  const [showShortTable, setShowShortTable] = useState<boolean>(false);
   const isMobile = useIsMobile();
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [autoNext, setAutoNext] = useState<boolean>(() =>
@@ -616,8 +664,10 @@ export default function App(): JSX.Element {
   const [pickedId, setPickedId] = useState<string | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const charBag = useRef<{ ids: string[] }>({ ids: [] });
+  const shortBag = useRef<{ ids: string[] }>({ ids: [] });
   const rootBag = useRef<{ ids: string[] }>({ ids: [] });
   const recentChars = useRef<string[]>([]);
+  const recentShort = useRef<string[]>([]);
 
   const [rootQ, setRootQ] = useState<RootItem | null>(null);
   const [choices, setChoices] = useState<RootItem[]>([]);
@@ -626,6 +676,7 @@ export default function App(): JSX.Element {
   const [hintOn, setHintOn] = useState<boolean>(false);
   const [verdict, setVerdict] = useState<Verdict>("idle");
   const [usedSelect, setUsedSelect] = useState<boolean>(false);
+  const [shortGrade, setShortGrade] = useState<ShortGradeResult | null>(null);
 
   const saved = useMemo(() => loadStats(), []);
   const [ok, setOk] = useState<number>(saved.ok);
@@ -656,12 +707,23 @@ export default function App(): JSX.Element {
     return hit;
   }, [diff, review, missChars]);
 
+  const baseShortPool = useMemo(() => filterShortPool(CHARS, shortTier), [shortTier]);
+  const shortPool = useMemo(() => {
+    if (!review) return baseShortPool;
+    return baseShortPool.filter((x) => (missChars[x.c] ?? 0) > 0);
+  }, [baseShortPool, review, missChars]);
+  const allShortSet = useMemo(() => new Set(CHARS.filter(isShortCodeChar).map((x) => x.c)), []);
+
   const rootPool = useMemo(() => {
     if (!review) return ROOTS;
     return ROOTS.filter((x) => (missRoots[rootId(x)] ?? 0) > 0);
   }, [review, missRoots]);
 
   const missedCharList = useMemo(() => topMissed(missChars, 8), [missChars]);
+  const missedShortList = useMemo(
+    () => topMissed(missChars, 200).filter((x) => allShortSet.has(x.id)).slice(0, 8),
+    [missChars, allShortSet],
+  );
   const missedRootList = useMemo(() => topMissed(missRoots, 8), [missRoots]);
 
   function focusInput(): void {
@@ -718,20 +780,41 @@ export default function App(): JSX.Element {
     qStartedAt.current = Date.now();
   }
 
+  function nextShort(prev: CharItem | null): void {
+    clearAutoNext();
+    // Drill every 1-key short code once per round; higher tiers and normal practice use frequency weighting.
+    const item =
+      review || shortTier === "one"
+        ? drawFromBag(shortBag.current, shortPool, prev, (x) => x.c)
+        : drawWeighted(shortPool, recentShort.current);
+    if (item) recentShort.current = [...recentShort.current, item.c].slice(-RECENT_AVOID);
+    setCharQ(item);
+    setTyped("");
+    setHintOn(false);
+    setVerdict("idle");
+    setUsedSelect(false);
+    setShortGrade(null);
+    qStartedAt.current = Date.now();
+  }
+
   useEffect(() => {
     charBag.current.ids = [];
+    shortBag.current.ids = [];
     rootBag.current.ids = [];
     recentChars.current = [];
+    recentShort.current = [];
     if (mode === "roots") nextRoot(null);
     else if (mode === "chars") nextChar(null);
+    else if (mode === "short") nextShort(null);
     else if (phase !== "run") {
       setCharQ(null);
       setVerdict("idle");
       setTyped("");
+      setShortGrade(null);
     }
     setHintOn(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, rootDir, diff, review]);
+  }, [mode, rootDir, diff, shortTier, review]);
 
   useEffect(() => {
     if (isMobile) return;
@@ -739,7 +822,7 @@ export default function App(): JSX.Element {
     if (mode === "timed" && phase !== "run") return;
     const t = window.setTimeout(() => focusInput(), 40);
     return () => window.clearTimeout(t);
-  }, [mode, rootQ, charQ, phase, rootDir, verdict, isMobile]);
+  }, [mode, rootQ, charQ, phase, rootDir, shortTier, verdict, isMobile]);
 
   useEffect(() => {
     return () => {
@@ -871,6 +954,20 @@ export default function App(): JSX.Element {
     }
   }
 
+  function submitShort(raw: string): void {
+    if (!charQ || verdict !== "idle") return;
+    if (!raw.trim()) return;
+    const res = gradeShortAnswer(charQ, raw);
+    grade(res.ok);
+    noteAttempt("short", res.ok);
+    setShortGrade(res);
+    setUsedSelect(res.kind === "select");
+    if (!res.ok) markMissChar(charQ.c);
+    if (res.ok && autoNext && isMobile) {
+      scheduleAutoNext(() => nextShort(charQ));
+    }
+  }
+
   function startTimed(): void {
     if (timerRef.current != null) window.clearInterval(timerRef.current);
     setPhase("run");
@@ -896,6 +993,8 @@ export default function App(): JSX.Element {
   function switchMode(v: Mode): void {
     setMode(v);
     setReview(false);
+    setShortGrade(null);
+    if (v !== "short") setShowShortTable(false);
     if (v !== "timed") setPhase("idle");
   }
 
@@ -928,8 +1027,10 @@ export default function App(): JSX.Element {
     }
     if (verdict !== "idle") {
       if (mode === "roots") nextRoot(rootQ);
+      else if (mode === "short") nextShort(charQ);
       else nextChar(charQ);
     } else if (mode === "roots" && rootDir === "forward") submitRoot(typed);
+    else if (mode === "short") submitShort(typed);
     else if (mode === "chars") submitChar(typed, false);
   }
 
@@ -939,6 +1040,7 @@ export default function App(): JSX.Element {
       return;
     }
     if (mode === "roots") nextRoot(rootQ);
+    else if (mode === "short") nextShort(charQ);
     else nextChar(charQ);
   }
 
@@ -946,10 +1048,11 @@ export default function App(): JSX.Element {
     const h = (ev: globalThis.KeyboardEvent): void => {
       if (ev.isComposing) return;
       const runTimed = mode === "timed" && phase === "run";
-      if (isMobile && (showSettings || showKb) && ev.key === "Escape") {
+      if (isMobile && (showSettings || showKb || showShortTable) && ev.key === "Escape") {
         ev.preventDefault();
         setShowSettings(false);
         setShowKb(false);
+        setShowShortTable(false);
         return;
       }
       if (ev.altKey) {
@@ -961,18 +1064,30 @@ export default function App(): JSX.Element {
         else if (c === "Digit4") switchMode("article");
         else if (c === "Digit5") switchMode("lookup");
         else if (c === "Digit6") switchMode("history");
+        else if (c === "Digit7") switchMode("short");
         else if ((mode === "article" || mode === "lookup" || mode === "history") && c !== "KeyK") hit = false;
         else if (c === "KeyQ") {
           if (mode === "roots") setRootDir("forward");
+          else if (mode === "short") setShortTier("one");
           else if (!runTimed) setDiff(100);
         } else if (c === "KeyW") {
           if (mode === "roots") setRootDir("reverse");
+          else if (mode === "short") setShortTier("two100");
           else if (!runTimed) setDiff(300);
         } else if (c === "KeyE" || c === "KeyT") {
           if (mode === "roots") hit = false;
+          else if (mode === "short") setShortTier(c === "KeyE" ? "two300" : "all");
           else if (!runTimed) setDiff(c === "KeyE" ? 600 : 1000);
+        } else if (c === "KeyJ") {
+          if (mode === "short") setShowShortTable((s) => !s);
+          else hit = false;
         } else if (c === "KeyR") {
-          const can = mode === "roots" ? Object.keys(missRoots).length > 0 : Object.keys(missChars).length > 0;
+          const can =
+            mode === "roots"
+              ? Object.keys(missRoots).length > 0
+              : mode === "short"
+                ? baseShortPool.some((x) => (missChars[x.c] ?? 0) > 0)
+                : Object.keys(missChars).length > 0;
           if (review || can) setReview(!review);
         } else if (c === "KeyK") setShowKb((s) => !s);
         else hit = false;
@@ -987,6 +1102,7 @@ export default function App(): JSX.Element {
         const typing =
           (mode === "roots" && rootDir === "forward") ||
           mode === "chars" ||
+          mode === "short" ||
           runTimed;
         const maxLen = mode === "roots" ? 2 : 6;
         if (typing && verdict === "idle" && /^[a-zA-Z]$/.test(k)) {
@@ -1022,8 +1138,10 @@ export default function App(): JSX.Element {
         ev.preventDefault();
         if (verdict !== "idle") {
           if (mode === "roots") nextRoot(rootQ);
+          else if (mode === "short") nextShort(charQ);
           else nextChar(charQ);
         } else if (mode === "roots" && rootDir === "forward") submitRoot(typed);
+        else if (mode === "short") submitShort(typed);
         else if (mode === "chars") submitChar(typed, false);
         return;
       }
@@ -1035,6 +1153,7 @@ export default function App(): JSX.Element {
       if (k === "Escape") {
         ev.preventDefault();
         if (mode === "roots") nextRoot(rootQ);
+        else if (mode === "short") nextShort(charQ);
         else nextChar(charQ);
         return;
       }
@@ -1095,13 +1214,17 @@ export default function App(): JSX.Element {
 
   const busyTimed = mode === "timed" && phase === "run";
   const canReview =
-    mode === "roots" ? missedRootList.length > 0 : missedCharList.length > 0;
+    mode === "roots"
+      ? missedRootList.length > 0
+      : mode === "short"
+        ? baseShortPool.some((x) => (missChars[x.c] ?? 0) > 0)
+        : missedCharList.length > 0;
 
   let charExplain = "";
   if (charQ) {
     const shorts = charQ.k.filter((x) => x.length <= 2);
     const longs = charQ.k.filter((x) => x.length >= 3);
-    if (hasJian(charQ) && longs.length > 0) {
+    if (isShortCodeChar(charQ) && longs.length > 0) {
       charExplain = "簡碼 " + fmtCodes(shorts.length ? shorts : [charQ.k[0]]) + "，全碼 " + fmtCodes(longs) + "。";
     } else if (charQ.k.length > 1) {
       charExplain = "可直接出字的碼：" + fmtCodes(charQ.k) + "。";
@@ -1116,20 +1239,48 @@ export default function App(): JSX.Element {
     }
   }
 
+  let shortFeedbackMsg = "";
+  if (shortGrade) {
+    const sc = fmtCodes(shortGrade.shortCodes);
+    const fc = shortGrade.fullCodes.length > 0 ? fmtCodes(shortGrade.fullCodes) : "";
+    if (shortGrade.kind === "short") {
+      shortFeedbackMsg = "答對了！簡碼 " + sc + (fc ? "（全碼 " + fc + "）。" : "。");
+    } else if (shortGrade.kind === "full") {
+      shortFeedbackMsg = "這是全碼！這題練簡碼，請記簡碼 " + sc + (fc ? "（全碼 " + fc + "）。" : "。");
+    } else if (shortGrade.kind === "select") {
+      shortFeedbackMsg =
+        "這個碼要選字；簡碼請打 " + sc + (fc ? "（全碼 " + fc + "）" : "") + "，空白鍵就能直接出字。";
+    } else {
+      shortFeedbackMsg = "不對。簡碼 " + sc + (fc ? "，全碼 " + fc + "。" : "。");
+    }
+  }
+
   if (isMobile) {
     const qaAnswer =
-      mode === "roots" && rootQ ? (rootDir === "reverse" ? rootQ.glyph : rootQ.key) : charQ ? charQ.k[0] : "";
+      mode === "roots" && rootQ
+        ? rootDir === "reverse"
+          ? rootQ.glyph
+          : rootQ.key
+        : mode === "short" && charQ
+          ? shortCodesOf(charQ)[0] ?? charQ.k[0]
+          : charQ
+            ? charQ.k[0]
+            : "";
     const showRootsOnKeys = hintOn || verdict !== "idle";
     const typingMode =
       (mode === "roots" && rootDir === "forward") ||
       mode === "chars" ||
+      mode === "short" ||
       (mode === "timed" && phase === "run");
     const submitLabel = verdict !== "idle" || (mode === "timed" && phase !== "run") ? "下一題" : "送出";
     const timedStartLabel = phase === "over" ? "再來一次" : "開始挑戰";
     const submitDisabled =
       verdict === "idle" && typingMode && typed.trim() === "" && !(mode === "timed" && phase !== "run");
     const emptyReview =
-      review && ((mode === "roots" && rootPool.length === 0) || (mode !== "roots" && pool.length === 0));
+      review &&
+      ((mode === "roots" && rootPool.length === 0) ||
+        (mode === "short" && shortPool.length === 0) ||
+        (mode !== "roots" && mode !== "short" && pool.length === 0));
 
     const header = (
       <header className="mobile-header">
@@ -1276,6 +1427,48 @@ export default function App(): JSX.Element {
           ) : null}
         </div>
       );
+    } else if (mode === "short" && charQ) {
+      const sc0 = shortCodesOf(charQ)[0] ?? charQ.k[0];
+      const fc0 = fullCodesOf(charQ)[0];
+      stageInner = (
+        <div className="mobile-q" data-testid="short-stage">
+          <p className="mobile-caption">
+            {shortTierTitle(shortTier, shortPool.length)} · 教育部字頻第 {charQ.r} 字
+          </p>
+          <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")} data-testid="short-glyph">
+            {charQ.c}
+          </div>
+          {typedBox}
+          {hintOn && verdict === "idle" ? (
+            <p
+              className="mobile-msg"
+              data-testid="short-hint"
+              style={{ color: theme.text.accent, fontWeight: theme.weight.semibold }}
+            >
+              {shortHintText(charQ, KEY_REPS)}
+            </p>
+          ) : verdict === "idle" ? (
+            <p className="mobile-caption">這題只收簡碼（1～2 鍵）；如果不小心打出全碼，系統會提醒你簡碼。</p>
+          ) : null}
+          {verdict !== "idle" && shortGrade ? (
+            <p
+              className="mobile-msg"
+              data-testid="short-feedback"
+              style={{
+                color: verdict === "ok" ? theme.text.success : theme.text.accent,
+                fontWeight: theme.weight.semibold,
+              }}
+            >
+              {shortFeedbackMsg}
+              <br />
+              <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
+                簡碼字根：{breakdown(sc0)}
+                {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
+              </span>
+            </p>
+          ) : null}
+        </div>
+      );
     } else if (mode === "timed") {
       if (phase === "idle") {
         stageInner = (
@@ -1338,10 +1531,11 @@ export default function App(): JSX.Element {
       >
         <div className="settings-block">
           <p className="settings-label">練習模式</p>
-          <div className="settings-seg settings-seg-6">
+          <div className="settings-seg settings-seg-7">
             {([
               ["roots", "字根練習"],
               ["chars", "常用字"],
+              ["short", "簡碼練習"],
               ["timed", "限時挑戰"],
               ["article", "文章練習"],
               ["lookup", "查碼"],
@@ -1361,7 +1555,9 @@ export default function App(): JSX.Element {
         </div>
         {mode === "article" || mode === "lookup" || mode === "history" ? null : (
         <div className="settings-block">
-          <p className="settings-label">{mode === "roots" ? "練習方向" : "常用字範圍"}</p>
+          <p className="settings-label">
+            {mode === "roots" ? "練習方向" : mode === "short" ? "簡碼範圍" : "常用字範圍"}
+          </p>
           <div className={"settings-seg" + (mode === "roots" ? "" : " settings-seg-4")}>
             {mode === "roots" ? (
               <>
@@ -1381,6 +1577,21 @@ export default function App(): JSX.Element {
                 >
                   看按鍵認字根
                 </button>
+              </>
+            ) : mode === "short" ? (
+              <>
+                {SHORT_TIERS.map((t) => (
+                  <button
+                    key={t.v}
+                    type="button"
+                    data-testid={"short-tier-" + t.v}
+                    className={"settings-chip" + (shortTier === t.v ? " is-on" : "")}
+                    style={chipStyle(shortTier === t.v)}
+                    onClick={() => setShortTier(t.v)}
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </>
             ) : (
               <>
@@ -1413,6 +1624,20 @@ export default function App(): JSX.Element {
             複習錯字
           </button>
           )}
+          {mode === "short" ? (
+          <button
+            type="button"
+            data-testid="short-table-toggle"
+            className="settings-chip"
+            style={{ ...chipStyle(showShortTable), width: "100%" }}
+            onClick={() => {
+              setShowSettings(false);
+              setShowShortTable(true);
+            }}
+          >
+            開啟簡碼表
+          </button>
+          ) : null}
           <button
             type="button"
             className="settings-chip"
@@ -1454,6 +1679,26 @@ export default function App(): JSX.Element {
                 ))}
               </ul>
             )
+          ) : mode === "short" ? (
+            missedShortList.length === 0 ? (
+              <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
+                還沒有簡碼錯字。可用「複習錯字」專攻常錯的題。
+              </p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {missedShortList.map((x) => {
+                  const item = CHARS.find((c) => c.c === x.id);
+                  const sc = item ? fmtCodes(shortCodesOf(item)) : "";
+                  const fc = item && fullCodesOf(item).length > 0 ? "（全碼 " + fmtCodes(fullCodesOf(item)) + "）" : "";
+                  return (
+                    <li key={x.id} style={{ ...theme.font.body1, marginBottom: 4 }}>
+                      {x.id} 簡碼 {sc}
+                      {fc} · 錯 {x.n} 次
+                    </li>
+                  );
+                })}
+              </ul>
+            )
           ) : missedCharList.length === 0 ? (
             <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
               還沒有錯字。可用「複習錯字」專攻常錯的題。
@@ -1489,6 +1734,18 @@ export default function App(): JSX.Element {
       </BottomSheet>
     ) : null;
 
+    const shortTableSheet =
+      mode === "short" && showShortTable ? (
+        <BottomSheet
+          theme={theme}
+          title="簡碼速查表"
+          onClose={() => setShowShortTable(false)}
+          testId="short-table-sheet"
+        >
+          <ShortCodeChart items={baseShortPool} tier={shortTier} />
+        </BottomSheet>
+      ) : null;
+
     if (mode === "history") {
       return (
         <Suspense fallback={<div className="mobile-shell" style={{ background: theme.bg.base }} />}>
@@ -1504,6 +1761,7 @@ export default function App(): JSX.Element {
               <>
                 {settingsSheet}
                 {chartSheet}
+                {shortTableSheet}
               </>
             }
           />
@@ -1523,6 +1781,7 @@ export default function App(): JSX.Element {
               <>
                 {settingsSheet}
                 {chartSheet}
+                {shortTableSheet}
               </>
             }
           />
@@ -1549,6 +1808,7 @@ export default function App(): JSX.Element {
               <>
                 {settingsSheet}
                 {chartSheet}
+                {shortTableSheet}
               </>
             }
           />
@@ -1620,6 +1880,7 @@ export default function App(): JSX.Element {
           <>
             {settingsSheet}
             {chartSheet}
+            {shortTableSheet}
           </>
         }
       />
@@ -1675,14 +1936,27 @@ export default function App(): JSX.Element {
             { value: "article", label: "文章練習 ⌥4" },
             { value: "lookup", label: "查碼 ⌥5" },
             { value: "history", label: "紀錄 ⌥6" },
+            { value: "short", label: "簡碼練習 ⌥7" },
           ]}
         />
         <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
-          快捷鍵：Enter 或空白鍵送出，答完再按一次跳下一題；/ 提示；Esc 跳過。⌥ 是 Option（Mac）或 Alt。紀錄請按 ⌥6。
+          快捷鍵：Enter 或空白鍵送出，答完再按一次跳下一題；/ 提示；Esc 跳過。⌥ 是 Option（Mac）或 Alt（紀錄 ⌥6、簡碼 ⌥7）。
         </p>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {mode === "article" || mode === "lookup" || mode === "history" ? null : mode !== "roots" ? (
+          {mode === "article" || mode === "lookup" || mode === "history" ? null : mode === "short" ? (
+            <>
+              {SHORT_TIERS.map((t) => (
+                <Pill
+                  key={t.v}
+                  testId={"short-tier-" + t.v}
+                  label={t.label + " ⌥" + t.key}
+                  on={shortTier === t.v}
+                  onClick={() => setShortTier(t.v)}
+                />
+              ))}
+            </>
+          ) : mode !== "roots" ? (
             <>
               {DIFFS.map((d) => (
                 <Pill
@@ -1708,13 +1982,31 @@ export default function App(): JSX.Element {
               onClick={() => setReview(!review)}
             />
           )}
+          {mode === "short" ? (
+            <Pill
+              testId="short-table-toggle"
+              label={showShortTable ? "收起簡碼表 ⌥J" : "開啟簡碼表 ⌥J"}
+              on={showShortTable}
+              onClick={() => setShowShortTable(!showShortTable)}
+            />
+          ) : null}
           <Pill label={showKb ? "收起字根表 ⌥K" : "開啟字根表 ⌥K"} on={showKb} onClick={() => setShowKb(!showKb)} />
         </div>
 
-        {review && ((mode === "roots" && rootPool.length === 0) || (mode !== "roots" && pool.length === 0)) ? (
+        {review &&
+        ((mode === "roots" && rootPool.length === 0) ||
+          (mode === "short" && shortPool.length === 0) ||
+          (mode !== "roots" && mode !== "short" && pool.length === 0)) ? (
           <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
             這輪還沒有錯字可複習，先練幾題再來。
           </p>
+        ) : null}
+
+        {mode === "short" && showShortTable ? (
+          <section style={card}>
+            <h2 style={{ ...theme.font.heading3, margin: "0 0 12px", fontWeight: theme.weight.semibold }}>簡碼速查表</h2>
+            <ShortCodeChart items={baseShortPool} tier={shortTier} />
+          </section>
         ) : null}
 
         {showKb ? (
@@ -1892,6 +2184,72 @@ export default function App(): JSX.Element {
           </section>
         ) : null}
 
+        {mode === "short" ? (
+          <section style={card} data-testid="short-stage">
+            {charQ ? (() => {
+              const sc0 = shortCodesOf(charQ)[0] ?? charQ.k[0];
+              const fc0 = fullCodesOf(charQ)[0];
+              return (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                  <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>
+                    {shortTierTitle(shortTier, shortPool.length)} · 教育部字頻第 {charQ.r} 字
+                  </div>
+                  <div style={{ fontSize: 80, lineHeight: 1, fontWeight: theme.weight.semibold }} data-testid="short-glyph">
+                    {charQ.c}
+                  </div>
+                  <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0, textAlign: "center" }}>
+                    這題只收簡碼（1～2 鍵）；如果不小心打出全碼，系統會提醒你簡碼。
+                  </p>
+                  <input
+                    ref={inputRef}
+                    value={typed}
+                    onChange={(e) => setTyped(e.target.value)}
+                    aria-label="嘸蝦米簡碼"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck={false}
+                    lang="en"
+                    inputMode="text"
+                    maxLength={6}
+                    style={inputStyle}
+                  />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                    <Action label="送出 Enter" primary onClick={() => submitShort(typed)} disabled={verdict !== "idle"} />
+                    <Action label="提示 /" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
+                    <Action label="下一題 Esc" onClick={() => nextShort(charQ)} />
+                  </div>
+                  {hintOn && verdict === "idle" ? (
+                    <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }} data-testid="short-hint">
+                      {shortHintText(charQ, KEY_REPS)}
+                    </p>
+                  ) : null}
+                  {verdict !== "idle" && shortGrade ? (
+                    <div style={{ textAlign: "center", maxWidth: 520 }} data-testid="short-feedback">
+                      <p
+                        style={{
+                          ...theme.font.body1,
+                          color: verdict === "ok" ? theme.text.success : theme.text.accent,
+                          margin: "0 0 6px",
+                          fontWeight: theme.weight.semibold,
+                        }}
+                      >
+                        {shortFeedbackMsg}
+                      </p>
+                      <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
+                        簡碼字根：{breakdown(sc0)}
+                        {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })() : (
+              <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>目前沒有可練的簡碼字。</p>
+            )}
+          </section>
+        ) : null}
+
         {mode === "lookup" ? (
           <Suspense fallback={<section style={card}>載入中…</section>}>
             <LookupMode theme={theme} isMobile={false} reps={KEY_REPS} onOpenSettings={() => undefined} />
@@ -2003,6 +2361,26 @@ export default function App(): JSX.Element {
                     {x.id.split(":")[1]} （{up(x.id.split(":")[0])} 鍵） · 錯 {x.n} 次
                   </li>
                 ))}
+              </ul>
+            )
+          ) : mode === "short" ? (
+            missedShortList.length === 0 ? (
+              <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
+                還沒有簡碼錯字。可用「複習錯字」專攻常錯的題。
+              </p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {missedShortList.map((x) => {
+                  const item = CHARS.find((c) => c.c === x.id);
+                  const sc = item ? fmtCodes(shortCodesOf(item)) : "";
+                  const fc = item && fullCodesOf(item).length > 0 ? "（全碼 " + fmtCodes(fullCodesOf(item)) + "）" : "";
+                  return (
+                    <li key={x.id} style={{ ...theme.font.body1, marginBottom: 4 }}>
+                      {x.id} 簡碼 {sc}
+                      {fc} · 錯 {x.n} 次
+                    </li>
+                  );
+                })}
               </ul>
             )
           ) : missedCharList.length === 0 ? (

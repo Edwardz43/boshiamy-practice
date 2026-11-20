@@ -205,4 +205,34 @@ assert.deepEqual(parsed1.data.settings, backup.settings);
 assert.equal(parsed1.data.version, backup.version);
 assert.equal(parsed1.data.exportedAt, backup.exportedAt);
 
+// short-code mode recording + legacy backup compatibility
+{
+  let sh = H.emptyHistory();
+  sh = H.recordAttempt(sh, "short", { tried: 3, ok: 2, ms: 4500 }, "2026-11-21");
+  const d = sh.days["2026-11-21"];
+  assert.equal(d.short.tried, 3);
+  assert.equal(d.short.ok, 2);
+  assert.equal(d.short.ms, 4500);
+  assert.equal(H.dayTotals(d, "all").tried, 3);
+  assert.equal(H.dayTotals(d, "short").ok, 2);
+
+  const b = H.makeBackup({ stats: statsA, history: sh, settings: { autoNext: false }, exportedAt: "2026-11-21T00:00:00.000Z" });
+  const rt = H.parseBackup(H.backupToJson(b));
+  assert.equal(rt.ok, true);
+  assert.equal(rt.data.history.days["2026-11-21"].short.tried, 3);
+
+  // legacy backup without short mode still imports & merges cleanly
+  const legacy = H.parseBackup(JSON.stringify({
+    version: 1,
+    exportedAt: "2026-11-19T00:00:00.000Z",
+    stats: statsB,
+    history: { days: { "2026-11-21": { date: "2026-11-21", chars: { tried: 2, ok: 1, ms: 2000 } } } },
+    settings: { autoNext: true },
+  }));
+  assert.equal(legacy.ok, true);
+  const mergedShort = H.applyBackup({ stats: statsA, history: sh, settings: { autoNext: false } }, legacy.data, "merge");
+  assert.equal(mergedShort.history.days["2026-11-21"].short.tried, 3);
+  assert.equal(mergedShort.history.days["2026-11-21"].chars.tried, 2);
+}
+
 console.log("ALL OK");

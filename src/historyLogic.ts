@@ -12,11 +12,12 @@ export const MAX_MAP_KEY_LEN = 16;
 export const MAX_INT = 1_000_000_000;
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export type DrillMode = "roots" | "chars" | "timed" | "article";
-export const DRILL_MODES: DrillMode[] = ["roots", "chars", "timed", "article"];
+export type DrillMode = "roots" | "chars" | "short" | "timed" | "article";
+export const DRILL_MODES: DrillMode[] = ["roots", "chars", "short", "timed", "article"];
 export const MODE_LABEL: Record<DrillMode, string> = {
   roots: "字根",
   chars: "常用字",
+  short: "簡碼",
   timed: "限時",
   article: "文章",
 };
@@ -31,6 +32,7 @@ export type DayRecord = {
   date: string;
   roots?: ModeStats;
   chars?: ModeStats;
+  short?: ModeStats;
   timed?: ModeStats;
   article?: ModeStats;
 };
