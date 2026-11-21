@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, typ
 import type { GrokTheme } from "./theme";
 import { OnScreenKeyboard } from "./OnScreenKeyboard";
 import { IconGearButton, MobileShell } from "./MobileChrome";
+import { BrandMark } from "./ThemePicker";
 import { WIKI_URL, pickArticle, type Article, type Table } from "./articleText";
 
 type Status = "loading" | "error" | "ready" | "done";
@@ -326,13 +327,13 @@ export default function ArticleMode(props: {
           if (!s.k) style = { color: theme.text.tertiary };
           else if (isCur)
             style = {
-              background: bad ? "rgba(200,60,40,0.18)" : theme.fill.secondary,
-              outline: "2px solid " + (bad ? "#c0392b" : theme.text.accent),
+              background: bad ? theme.fill.dangerSoft : theme.fill.primarySoft,
+              outline: "2px solid " + (bad ? theme.text.danger : theme.brand.primary),
               borderRadius: 4,
             };
           else if (m === "ok") style = { color: theme.text.success };
           else if (m === "bad" || m === "skip")
-            style = { color: theme.kind === "dark" ? "#ff8a7a" : "#b3261e", textDecoration: "underline wavy" };
+            style = { color: theme.text.danger, textDecoration: "underline wavy" };
           return (
             <span
               key={i}
@@ -390,6 +391,18 @@ export default function ArticleMode(props: {
         ? "完成 · 正確率 " + acc
         : "文章練習";
 
+  const progressPct = art && art.codable > 0 ? Math.min(100, Math.round((stats.done / art.codable) * 100)) : 0;
+
+  const progressBar =
+    art && (status === "ready" || status === "done") ? (
+      <div className="article-progress-track" aria-hidden="true">
+        <div
+          className="article-progress-fill"
+          style={{ width: (status === "done" ? 100 : progressPct) + "%" }}
+        />
+      </div>
+    ) : null;
+
   const result =
     status === "done" && art ? (
       <div className="article-result" data-testid="article-result">
@@ -433,8 +446,11 @@ export default function ArticleMode(props: {
     const header = (
       <header className="mobile-header">
         <div className="mobile-header-text">
-          <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
-          <div className="mobile-header-stats" style={{ color: theme.text.secondary }}>
+          <div className="mobile-brand-row">
+            <BrandMark size={26} />
+            <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
+          </div>
+          <div className="mobile-header-stats">
             {progress}
           </div>
         </div>
@@ -446,15 +462,16 @@ export default function ArticleMode(props: {
         {loadingEl}
         {errorEl}
         {status === "ready" || status === "done" ? titleRow : null}
+        {status === "ready" ? progressBar : null}
         {status === "ready" ? passage : null}
         {status === "ready" && cur ? (
           <div className="article-cur-row">
-            <div className="article-cur-glyph" style={{ borderColor: bad ? "#c0392b" : theme.border.strong }}>
+            <div className="article-cur-glyph" style={{ borderColor: bad ? theme.text.danger : theme.brand.primary }}>
               {cur.c}
             </div>
             <div
               className={"mobile-typed" + (typed ? "" : " is-empty")}
-              style={{ borderColor: theme.border.strong, background: theme.bg.elevated, color: theme.text.primary }}
+              style={{ borderColor: bad ? theme.text.danger : theme.border.strong }}
               data-testid="typed-display"
             >
               {typed ? up(typed) : "點鍵盤輸入"}
@@ -515,46 +532,31 @@ export default function ArticleMode(props: {
     );
   }
 
-  const btn = (label: string, onClick: () => void, primary?: boolean, disabled?: boolean): JSX.Element => (
+  const btn = (label: string, kbd: string | null, onClick: () => void, primary?: boolean, disabled?: boolean): JSX.Element => (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      style={{
-        ...theme.font.label,
-        minHeight: 44,
-        padding: "0 18px",
-        borderRadius: theme.radius.full,
-        border: "1px solid " + (primary ? theme.border.strong : theme.border.default),
-        background: primary ? theme.bg.elevated : "transparent",
-        color: disabled ? theme.text.tertiary : theme.text.primary,
-        fontWeight: theme.weight.semibold,
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-      }}
+      className={"ui-btn" + (primary ? " ui-btn-primary" : "")}
     >
-      {label}
+      <span>{label}</span>
+      {kbd ? <kbd className={"kbd" + (primary ? " kbd-on-primary" : "")}>{kbd}</kbd> : null}
     </button>
   );
 
   return (
     <section
       data-testid="article-desktop"
+      className="stage-card"
       style={{
-        background: theme.bg.elevated,
-        border: "1px solid " + theme.border.default,
-        borderRadius: 18,
-        padding: 18,
-        boxSizing: "border-box",
-        width: "100%",
-        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         gap: 12,
         alignItems: "center",
       }}
     >
-      <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>{progress}</div>
+      <div className="stage-meta">{progress}</div>
+      {progressBar}
       {loadingEl}
       {errorEl}
       {status === "ready" || status === "done" ? titleRow : null}
@@ -562,7 +564,12 @@ export default function ArticleMode(props: {
       {status === "ready" && cur ? (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-            <div style={{ fontSize: 56, lineHeight: 1, fontWeight: theme.weight.semibold }}>{cur.c}</div>
+            <div
+              className={"glyph-stage" + (bad ? " is-bad" : "")}
+              style={{ minWidth: 88, height: 88, fontSize: 48 }}
+            >
+              {cur.c}
+            </div>
             <input
               ref={inputRef}
               value={typed}
@@ -579,28 +586,15 @@ export default function ArticleMode(props: {
               lang="en"
               maxLength={6}
               readOnly={bad}
-              style={{
-                width: 200,
-                minHeight: 48,
-                fontSize: 18,
-                letterSpacing: "0.14em",
-                textAlign: "center",
-                textTransform: "uppercase",
-                fontFamily: theme.font.family,
-                color: theme.text.primary,
-                background: theme.bg.base,
-                border: "1px solid " + (bad ? "#c0392b" : theme.border.strong),
-                borderRadius: 12,
-                padding: "8px 12px",
-                boxSizing: "border-box",
-              }}
+              className={"code-input" + (bad ? " is-bad" : "")}
+              style={{ width: 200, maxWidth: 200 }}
             />
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-            {btn(bad ? "下一字 Enter" : "送出 Enter", submit, true, !bad && typed.trim() === "")}
-            {btn("提示 /", () => setHintOn(true), false, bad)}
-            {btn("跳過此字 Esc", skip)}
-            {btn("換一篇 ⌥N", () => void load())}
+            {btn(bad ? "下一字" : "送出", "Enter", submit, true, !bad && typed.trim() === "")}
+            {btn("提示", "/", () => setHintOn(true), false, bad)}
+            {btn("跳過此字", "Esc", skip)}
+            {btn("換一篇", "⌥N", () => void load())}
           </div>
           <div style={{ textAlign: "center", maxWidth: 560 }}>{curMsg}</div>
         </>
@@ -608,11 +602,11 @@ export default function ArticleMode(props: {
       {result}
       {status === "done" ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-          {btn("再一篇 Enter", () => void load(), true)}
-          {btn("重打這篇 R", retype)}
+          {btn("再一篇", "Enter", () => void load(), true)}
+          {btn("重打這篇", "R", retype)}
         </div>
       ) : null}
-      {status === "error" ? btn("重試 Enter", () => void load(), true) : null}
+      {status === "error" ? btn("重試", "Enter", () => void load(), true) : null}
       <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0, textAlign: "center" }}>
         文章取自中文維基百科隨機條目的開頭（台灣正體），內容依 CC BY-SA 授權。快捷鍵：空白鍵／Enter 送出，/ 提示，Esc
         跳過此字，⌥N 換一篇。

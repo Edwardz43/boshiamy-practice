@@ -51,7 +51,20 @@ export type SavedStats = {
 
 export type BackupSettings = {
   autoNext: boolean;
+  theme?: string;
+  colorMode?: string;
 };
+
+const VALID_THEMES = new Set(["ink", "studio", "playful", "minimal"]);
+const VALID_COLOR_MODES = new Set(["system", "light", "dark"]);
+
+export function sanitizeSettings(raw: unknown): BackupSettings {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: BackupSettings = { autoNext: !!r.autoNext };
+  if (typeof r.theme === "string" && VALID_THEMES.has(r.theme)) out.theme = r.theme;
+  if (typeof r.colorMode === "string" && VALID_COLOR_MODES.has(r.colorMode)) out.colorMode = r.colorMode;
+  return out;
+}
 
 export type BackupFile = {
   version: number;
@@ -368,7 +381,7 @@ export function makeBackup(input: {
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     stats: sanitizeStats(input.stats),
     history: sanitizeHistory(input.history),
-    settings: { autoNext: !!input.settings.autoNext },
+    settings: sanitizeSettings(input.settings),
   };
 }
 
@@ -394,11 +407,10 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
   if (!p.stats || typeof p.stats !== "object") {
     return { ok: false, error: "備份檔缺少練習紀錄。" };
   }
-  const settingsRaw = p.settings && typeof p.settings === "object" ? (p.settings as Partial<BackupSettings>) : {};
   const data = makeBackup({
     stats: sanitizeStats(p.stats),
     history: sanitizeHistory(p.history ?? emptyHistory()),
-    settings: { autoNext: !!settingsRaw.autoNext },
+    settings: sanitizeSettings(p.settings),
     exportedAt: typeof p.exportedAt === "string" ? p.exportedAt : new Date().toISOString(),
   });
   return { ok: true, data };
@@ -415,7 +427,7 @@ export function applyBackup(
     return {
       stats: sanitizeStats(incoming.stats),
       history: sanitizeHistory(incoming.history),
-      settings: { autoNext: !!incoming.settings?.autoNext },
+      settings: sanitizeSettings(incoming.settings),
     };
   }
   return {

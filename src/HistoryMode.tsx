@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type JSX, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ChangeEvent, type JSX, type ReactNode } from "react";
 import type { GrokTheme } from "./theme";
 import { IconGearButton, MobileShell } from "./MobileChrome";
+import { BrandMark } from "./ThemePicker";
 import {
   type BackupFile,
   type BackupSettings,
@@ -118,34 +119,12 @@ export default function HistoryMode(props: {
     setMsg(mode === "merge" ? "已合併到現有紀錄。" : "已用備份檔覆蓋現有紀錄。");
   }
 
-  const chip = (on: boolean): CSSProperties => ({
-    ...theme.font.label,
-    minHeight: 40,
-    padding: "0 12px",
-    borderRadius: theme.radius.full,
-    border: "1px solid " + (on ? theme.border.strong : theme.border.default),
-    background: on ? theme.bg.elevated : "transparent",
-    color: theme.text.primary,
-    fontWeight: on ? theme.weight.semibold : theme.weight.medium,
-    cursor: "pointer",
-  });
-
   const actionBtn = (label: string, onClick: () => void, testId: string, primary?: boolean): JSX.Element => (
     <button
       type="button"
       data-testid={testId}
+      className={"ui-btn" + (primary ? " ui-btn-primary" : "")}
       onClick={onClick}
-      style={{
-        ...theme.font.label,
-        minHeight: 44,
-        padding: "0 18px",
-        borderRadius: theme.radius.full,
-        border: "1px solid " + (primary ? theme.border.strong : theme.border.default),
-        background: primary ? theme.bg.elevated : "transparent",
-        color: theme.text.primary,
-        fontWeight: theme.weight.semibold,
-        cursor: "pointer",
-      }}
     >
       {label}
     </button>
@@ -197,11 +176,7 @@ export default function HistoryMode(props: {
           value: formatSpeed(totals, filter),
         },
       ].map((s) => (
-        <div
-          key={s.label}
-          className="history-stat"
-          style={{ borderColor: theme.border.subtle, background: theme.bg.elevated }}
-        >
+        <div key={s.label} className="history-stat">
           <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>{s.label}</div>
           <div style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold, marginTop: 2, overflowWrap: "anywhere" }}>
             {s.value}
@@ -220,8 +195,8 @@ export default function HistoryMode(props: {
             type="button"
             data-testid={"history-range-" + n}
             aria-pressed={range === n}
+            className={"ui-pill" + (range === n ? " is-on" : "")}
             onClick={() => setRange(n)}
-            style={chip(range === n)}
           >
             近 {n} 天
           </button>
@@ -234,8 +209,8 @@ export default function HistoryMode(props: {
             type="button"
             data-testid={"history-filter-" + f.v}
             aria-pressed={filter === f.v}
+            className={"ui-pill" + (filter === f.v ? " is-on" : "")}
             onClick={() => setFilter(f.v)}
-            style={chip(filter === f.v)}
           >
             {f.label}
           </button>
@@ -355,7 +330,7 @@ export default function HistoryMode(props: {
         </p>
       ) : null}
       {err ? (
-        <p data-testid="history-err" style={{ ...theme.font.caption, color: "#c0392b", margin: "8px 0 0" }}>
+        <p data-testid="history-err" style={{ ...theme.font.caption, color: theme.text.danger, margin: "8px 0 0" }}>
           {err}
         </p>
       ) : null}
@@ -376,8 +351,11 @@ export default function HistoryMode(props: {
     const header = (
       <header className="mobile-header">
         <div className="mobile-header-text">
-          <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
-          <div className="mobile-header-stats" style={{ color: theme.text.secondary }}>
+          <div className="mobile-brand-row">
+            <BrandMark size={26} />
+            <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
+          </div>
+          <div className="mobile-header-stats">
             紀錄 · 近 {range} 天 {formatPct(totals)}
           </div>
         </div>
@@ -400,20 +378,14 @@ export default function HistoryMode(props: {
   return (
     <section
       data-testid="history-desktop"
+      className="stage-card"
       style={{
-        background: theme.bg.elevated,
-        border: "1px solid " + theme.border.default,
-        borderRadius: 18,
-        padding: 18,
-        boxSizing: "border-box",
-        width: "100%",
-        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         gap: 14,
       }}
     >
-      <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>紀錄</div>
+      <div className="stage-meta" style={{ alignSelf: "flex-start" }}>練習紀錄與進步趨勢</div>
       {body}
     </section>
   );
@@ -432,11 +404,12 @@ function LineOrBarChart(props: {
   formatValue: (v: number) => string;
 }): JSX.Element {
   const { theme } = props;
-  const w = 360;
-  const h = 140;
-  const padL = 36;
-  const padR = 22;
-  const padT = 12;
+  const uid = useId().replace(/:/g, "");
+  const w = 380;
+  const h = 148;
+  const padL = 42;
+  const padR = 16;
+  const padT = 14;
   const padB = 26;
   const innerW = w - padL - padR;
   const innerH = h - padT - padB;
@@ -447,9 +420,11 @@ function LineOrBarChart(props: {
   const rawMax = props.yMax != null ? props.yMax : dataMax;
   const yMax = rawMax > yMin ? rawMax : yMin + 1;
   const n = props.labels.length;
+  const barW = n > 0 ? Math.max(3, Math.min(18, (innerW / Math.max(n, 1)) * 0.56)) : 8;
+  const plotInset = props.kind === "bar" ? Math.max(12, barW / 2 + 6) : 10;
   const xAt = (i: number): number => {
     if (n <= 1) return padL + innerW / 2;
-    return padL + (i / (n - 1)) * innerW;
+    return padL + plotInset + (i / (n - 1)) * (innerW - plotInset * 2);
   };
   const yAt = (v: number): number => padT + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
   const ticks = [yMin, yMin + (yMax - yMin) / 2, yMax];
@@ -461,15 +436,29 @@ function LineOrBarChart(props: {
   const linePath = points
     .map((p, idx) => (idx === 0 ? "M" : "L") + p.x.toFixed(1) + " " + p.y.toFixed(1))
     .join(" ");
-  const barW = n > 0 ? Math.max(2, Math.min(16, (innerW / n) * 0.6)) : 8;
+  const areaPath =
+    points.length >= 2
+      ? linePath +
+        " L" +
+        points[points.length - 1].x.toFixed(1) +
+        " " +
+        (padT + innerH).toFixed(1) +
+        " L" +
+        points[0].x.toFixed(1) +
+        " " +
+        (padT + innerH).toFixed(1) +
+        " Z"
+      : "";
   const xLabels =
     n <= 8
       ? props.labels.map((d, i) => ({ i, label: d.slice(5) }))
       : [0, Math.floor((n - 1) / 2), n - 1].map((i) => ({ i, label: props.labels[i].slice(5) }));
 
   return (
-    <figure className="history-chart-block" style={{ margin: 0 }}>
-      <figcaption style={{ ...theme.font.caption, color: theme.text.secondary, marginBottom: 4 }}>{props.title}</figcaption>
+    <figure className="history-chart-card" style={{ margin: 0 }}>
+      <figcaption style={{ ...theme.font.caption, color: theme.text.secondary, fontWeight: theme.weight.semibold, marginBottom: 4 }}>
+        {props.title}
+      </figcaption>
       <svg
         viewBox={"0 0 " + w + " " + h}
         className="history-chart"
@@ -477,15 +466,16 @@ function LineOrBarChart(props: {
         role="img"
         aria-label={props.title}
       >
-        <line x1={padL} y1={padT} x2={padL} y2={padT + innerH} stroke={theme.border.default} strokeWidth="1" />
-        <line
-          x1={padL}
-          y1={padT + innerH}
-          x2={padL + innerW}
-          y2={padT + innerH}
-          stroke={theme.border.default}
-          strokeWidth="1"
-        />
+        <defs>
+          <linearGradient id={"bar-" + uid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={theme.brand.primary} stopOpacity="0.95" />
+            <stop offset="100%" stopColor={theme.text.accent} stopOpacity="0.68" />
+          </linearGradient>
+          <linearGradient id={"area-" + uid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={theme.brand.primary} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={theme.brand.primary} stopOpacity="0.01" />
+          </linearGradient>
+        </defs>
         {ticks.map((t, i) => (
           <g key={i}>
             <line
@@ -493,11 +483,12 @@ function LineOrBarChart(props: {
               y1={yAt(t)}
               x2={padL + innerW}
               y2={yAt(t)}
-              stroke={theme.border.subtle}
+              stroke={i === 0 ? theme.border.default : theme.border.subtle}
+              strokeDasharray={i === 0 ? undefined : "2 3"}
               strokeWidth="1"
             />
             <text
-              x={padL - 4}
+              x={padL - 7}
               y={yAt(t) + 3}
               textAnchor="end"
               fill={theme.text.tertiary}
@@ -519,10 +510,9 @@ function LineOrBarChart(props: {
                   x={xAt(i) - barW / 2}
                   y={y}
                   width={barW}
-                  height={Math.max(0, bh)}
-                  rx="2"
-                  fill={theme.text.accent}
-                  opacity={0.85}
+                  height={Math.max(2, bh)}
+                  rx="3"
+                  fill={"url(#bar-" + uid + ")"}
                 >
                   <title>
                     {props.labels[i]} {props.formatValue(v)}
@@ -531,12 +521,23 @@ function LineOrBarChart(props: {
               );
             })
           : null}
+        {props.kind === "line" && areaPath ? (
+          <path d={areaPath} fill={"url(#area-" + uid + ")"} />
+        ) : null}
         {props.kind === "line" && linePath ? (
-          <path d={linePath} fill="none" stroke={theme.text.accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={linePath} fill="none" stroke={theme.brand.primary} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
         ) : null}
         {props.kind === "line"
           ? points.map((p) => (
-              <circle key={props.labels[p.i]} cx={p.x} cy={p.y} r="2.6" fill={theme.text.accent}>
+              <circle
+                key={props.labels[p.i]}
+                cx={p.x}
+                cy={p.y}
+                r="3"
+                fill={theme.brand.primary}
+                stroke={theme.bg.elevated}
+                strokeWidth="1.5"
+              >
                 <title>
                   {props.labels[p.i]} {props.formatValue(p.v)}
                 </title>
@@ -548,7 +549,7 @@ function LineOrBarChart(props: {
             key={x.i}
             x={xAt(x.i)}
             y={h - 6}
-            textAnchor={x.i === 0 ? "start" : x.i === n - 1 ? "end" : "middle"}
+            textAnchor="middle"
             fill={theme.text.tertiary}
             fontSize="9"
             fontFamily={theme.font.family}

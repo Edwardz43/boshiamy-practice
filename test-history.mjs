@@ -235,4 +235,37 @@ assert.equal(parsed1.data.exportedAt, backup.exportedAt);
   assert.equal(mergedShort.history.days["2026-11-21"].chars.tried, 2);
 }
 
+// theme & colorMode settings round-trip, whitelist validation, and legacy compatibility
+{
+  const themedBackup = H.makeBackup({
+    stats: statsA,
+    history: hist,
+    settings: { autoNext: true, theme: "studio", colorMode: "dark" },
+    exportedAt: "2026-11-21T00:00:00.000Z",
+  });
+  assert.deepEqual(themedBackup.settings, { autoNext: true, theme: "studio", colorMode: "dark" });
+  const parsedThemed = H.parseBackup(H.backupToJson(themedBackup));
+  assert.equal(parsedThemed.ok, true);
+  assert.deepEqual(parsedThemed.data.settings, { autoNext: true, theme: "studio", colorMode: "dark" });
+
+  const replacedThemed = H.applyBackup(
+    { stats: statsA, history: hist, settings: { autoNext: false, theme: "ink", colorMode: "light" } },
+    parsedThemed.data,
+    "replace",
+  );
+  assert.deepEqual(replacedThemed.settings, { autoNext: true, theme: "studio", colorMode: "dark" });
+
+  const invalidThemeParsed = H.parseBackup(JSON.stringify({
+    version: 1,
+    exportedAt: "2026-11-21T00:00:00.000Z",
+    stats: statsA,
+    history: { days: {} },
+    settings: { autoNext: false, theme: "hacker-neon", colorMode: "midnight", __proto__: { polluted: 1 } },
+  }));
+  assert.equal(invalidThemeParsed.ok, true);
+  assert.deepEqual(invalidThemeParsed.data.settings, { autoNext: false });
+  assert.equal(Object.prototype.hasOwnProperty.call(invalidThemeParsed.data.settings, "theme"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(invalidThemeParsed.data.settings, "colorMode"), false);
+}
+
 console.log("ALL OK");

@@ -16,11 +16,12 @@
 - **授權與資料檔**：`public/liu-table.json`、`public/opencc-chars.json` 與 `public/opencc-LICENSE.txt`（Apache-2.0）不可刪除；重建繁簡表請用 `node scripts/build-opencc.mjs`。
 - **發佈前驗證**：
   1. 建置：`npm run build`（含 `tsc --noEmit` 與 `vite build`）。
-  2. 邏輯測試：`node test-lookup.mjs`、`node test-history.mjs`。
-  3. UI／CSP 測試：先啟動 `npx vite preview --host 127.0.0.1 --port 4180 --strictPort`，再執行 `node test-csp.mjs`、`node test-lookup-ui.mjs`、`node test-history-ui.mjs`、`node test-article.mjs`。
+  2. 邏輯測試：`node test-lookup.mjs`、`node test-short.mjs`、`node test-history.mjs`。
+  3. UI／CSP 測試：先啟動 `npx vite preview --host 127.0.0.1 --port 4180 --strictPort`，再執行 `node test-csp.mjs`、`node test-lookup-ui.mjs`、`node test-history-ui.mjs`、`node test-article.mjs`、`node test-short-ui.mjs`、`node test-theme-ui.mjs`。
 
 ## 分支與部署規則
 
 - `main` 受 `protect-main` 保護：禁止強制推送（force-push）與刪除分支，一律正常 fast-forward commit 推送。
+- **開發完即部署**：每次開發完成並通過上述發佈前驗證後，直接建立 commit 並推送至 `main` 觸發自動部署（無需額外等待確認），方便立刻在手機等裝置上試用。
 - 推送至 `main` 後由 `.github/workflows/pages.yml` 自動 `npm ci`、`npm run build` 並部署至 GitHub Pages；切勿再手動把 `dist/` 覆蓋進 `main` 根目錄。
 - 舊版純 `dist/` 最後狀態已保留於 git tag `legacy-dist-69777e3`。

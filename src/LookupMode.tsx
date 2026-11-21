@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import type { GrokTheme } from "./theme";
 import { IconGearButton, MobileShell } from "./MobileChrome";
+import { BrandMark } from "./ThemePicker";
 import {
   buildReverse,
   detectMode,
@@ -97,25 +98,25 @@ export default function LookupMode(props: {
     [reverse, kind, codes],
   );
 
-  const cardBorder = theme.border.default;
   const pill = (bg: string, fg: string): CSSProperties => ({
     display: "inline-block",
     fontSize: 11,
     lineHeight: 1.5,
-    padding: "0 7px",
+    padding: "1px 8px",
     borderRadius: 999,
     background: bg,
     color: fg,
-    fontWeight: theme.weight.medium,
+    fontWeight: theme.weight.semibold,
     whiteSpace: "nowrap",
   });
-  const tagShort = pill(theme.kind === "dark" ? "rgba(80,190,140,0.2)" : "rgba(29,112,64,0.12)", theme.text.success);
+  const tagShort = pill(theme.fill.successSoft, theme.text.success);
   const tagPick = pill(theme.fill.secondary, theme.text.secondary);
 
   const input = (
     <textarea
       ref={inputRef}
       data-testid="lookup-input"
+      className="code-textarea"
       value={value}
       rows={isMobile ? 3 : 4}
       placeholder="輸入或貼上中文字，例如：嘸蝦米　　　也可以輸入英文字碼反查，例如：ab"
@@ -136,23 +137,12 @@ export default function LookupMode(props: {
         setQuery(e.currentTarget.value);
       }}
       onKeyDown={(e) => {
-        // Keep typing here away from the practice modes' global key handler; Alt+1~5 still switches mode.
+        // Keep typing here away from the practice modes' global key handler; Alt+1~7 still switches mode.
         if (!e.altKey) e.nativeEvent.stopPropagation();
       }}
       style={{
-        width: "100%",
-        boxSizing: "border-box",
-        resize: "vertical",
         minHeight: isMobile ? 76 : 96,
         maxHeight: isMobile ? 160 : 260,
-        padding: "10px 12px",
-        fontSize: 18,
-        lineHeight: 1.5,
-        fontFamily: theme.font.family,
-        color: theme.text.primary,
-        background: theme.bg.base,
-        border: "1px solid " + theme.border.strong,
-        borderRadius: 12,
       }}
     />
   );
@@ -167,7 +157,7 @@ export default function LookupMode(props: {
     </span>
   );
 
-  const missColor = theme.kind === "dark" ? "#ff8a7a" : "#b3261e";
+  const missColor = theme.text.danger;
   const variantBlock = (ch: string): JSX.Element | null => {
     if (!table) return null;
     const groups = variantsOf(table, vars, ch);
@@ -231,7 +221,7 @@ export default function LookupMode(props: {
         </p>
         <ul className="lookup-list" data-testid="lookup-results">
           {forward.results.map((r) => (
-            <li key={r.c} className="lookup-row" style={{ borderColor: cardBorder, background: theme.bg.elevated }} data-char={r.c}>
+            <li key={r.c} className="lookup-row" data-char={r.c}>
               <span className="lookup-glyph">{r.c}</span>
               {r.found ? (
                 <span className="lookup-codes">
@@ -246,7 +236,7 @@ export default function LookupMode(props: {
                 </span>
               ) : (
                 <span className="lookup-codes">
-                  <span className="lookup-missing" style={{ color: theme.kind === "dark" ? "#ff8a7a" : "#b3261e" }}>
+                  <span className="lookup-missing" style={{ color: theme.text.danger }}>
                     查無
                   </span>
                   {variantBlock(r.c)}
@@ -261,7 +251,7 @@ export default function LookupMode(props: {
     body = (
       <ul className="lookup-list" data-testid="lookup-results">
         {reverseRes.map((r) => (
-          <li key={r.code} className="lookup-row is-reverse" style={{ borderColor: cardBorder, background: theme.bg.elevated }} data-code={r.code}>
+          <li key={r.code} className="lookup-row is-reverse" data-code={r.code}>
             <span className="lookup-glyph lookup-glyph-code">{up(r.code)}</span>
             {r.chars.length ? (
               <span className="lookup-chars">
@@ -306,8 +296,11 @@ export default function LookupMode(props: {
     const header = (
       <header className="mobile-header">
         <div className="mobile-header-text">
-          <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
-          <div className="mobile-header-stats" style={{ color: theme.text.secondary }}>
+          <div className="mobile-brand-row">
+            <BrandMark size={26} />
+            <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
+          </div>
+          <div className="mobile-header-stats">
             查碼
           </div>
         </div>
@@ -361,41 +354,26 @@ export default function LookupMode(props: {
   return (
     <section
       data-testid="lookup-desktop"
+      className="stage-card"
       style={{
-        background: theme.bg.elevated,
-        border: "1px solid " + theme.border.default,
-        borderRadius: 18,
-        padding: 18,
-        boxSizing: "border-box",
-        width: "100%",
-        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         gap: 12,
       }}
     >
-      <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>查碼</div>
+      <div className="stage-meta" style={{ alignSelf: "flex-start" }}>查碼工具</div>
       {input}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button
           type="button"
+          className="ui-btn"
+          style={{ minHeight: 38 }}
           onClick={() => {
             setValue("");
             setQuery("");
             inputRef.current?.focus();
           }}
           disabled={!value}
-          style={{
-            ...theme.font.label,
-            minHeight: 40,
-            padding: "0 18px",
-            borderRadius: theme.radius.full,
-            border: "1px solid " + theme.border.default,
-            background: "transparent",
-            color: value ? theme.text.primary : theme.text.tertiary,
-            fontWeight: theme.weight.semibold,
-            cursor: value ? "pointer" : "default",
-          }}
         >
           清除
         </button>

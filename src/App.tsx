@@ -5,13 +5,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type JSX,
 } from "react";
-import { useGrokTheme } from "./theme";
+import { isColorMode, isThemeId, useGrokTheme, useThemeControl } from "./theme";
 import { useIsMobile } from "./useIsMobile";
 import { OnScreenKeyboard } from "./OnScreenKeyboard";
 import { BottomSheet, IconGearButton, MobileShell, ToggleRow } from "./MobileChrome";
+import { BrandMark, DesktopThemeBar, MobileThemeSection, ModeIcon, type NavMode } from "./ThemePicker";
 import {
   type BackupFile,
   type DrillMode,
@@ -428,27 +428,13 @@ function topMissed(map: Record<string, number>, limit: number): { id: string; n:
     .slice(0, limit);
 }
 
-function SegmentedControl<T extends string>(props: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
+function SegmentedControl(props: {
+  value: NavMode;
+  onChange: (v: NavMode) => void;
+  options: { value: NavMode; label: string; kbd: string }[];
 }): JSX.Element {
-  const theme = useGrokTheme();
   return (
-    <div
-      role="tablist"
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        gap: 6,
-        padding: 4,
-        borderRadius: theme.radius.full,
-        background: theme.fill.secondary,
-        border: "1px solid " + theme.border.subtle,
-        width: "100%",
-        boxSizing: "border-box",
-      }}
-    >
+    <div role="tablist" className="mode-tabs">
       {props.options.map((opt) => {
         const on = opt.value === props.value;
         return (
@@ -458,21 +444,11 @@ function SegmentedControl<T extends string>(props: {
             role="tab"
             aria-selected={on}
             onClick={() => props.onChange(opt.value)}
-            style={{
-              ...theme.font.label,
-              flex: "1 1 0",
-              minWidth: 88,
-              minHeight: 44,
-              border: on ? "1px solid " + theme.border.strong : "1px solid transparent",
-              borderRadius: theme.radius.full,
-              background: on ? theme.bg.elevated : "transparent",
-              color: theme.text.primary,
-              fontWeight: on ? theme.weight.semibold : theme.weight.medium,
-              cursor: "pointer",
-              padding: "0 12px",
-            }}
+            className={"mode-tab" + (on ? " is-on" : "")}
           >
-            {opt.label}
+            <ModeIcon mode={opt.value} />
+            <span>{opt.label}</span>
+            <kbd className="kbd kbd-tab">{opt.kbd}</kbd>
           </button>
         );
       })}
@@ -482,119 +458,76 @@ function SegmentedControl<T extends string>(props: {
 
 function Pill(props: {
   label: string;
+  kbd?: string;
   on: boolean;
   onClick: () => void;
   disabled?: boolean;
   testId?: string;
 }): JSX.Element {
-  const theme = useGrokTheme();
   return (
     <button
       type="button"
       data-testid={props.testId}
       onClick={props.onClick}
       disabled={props.disabled}
-      style={{
-        ...theme.font.label,
-        minHeight: 44,
-        padding: "0 14px",
-        borderRadius: theme.radius.full,
-        border: "1px solid " + (props.on ? theme.border.strong : theme.border.default),
-        background: props.on ? theme.bg.elevated : "transparent",
-        color: props.disabled ? theme.text.tertiary : theme.text.primary,
-        fontWeight: props.on ? theme.weight.semibold : theme.weight.medium,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.55 : 1,
-      }}
+      className={"ui-pill" + (props.on ? " is-on" : "")}
     >
-      {props.label}
+      <span>{props.label}</span>
+      {props.kbd ? <kbd className="kbd kbd-tab">{props.kbd}</kbd> : null}
     </button>
   );
 }
 
-function Action(props: { label: string; onClick: () => void; primary?: boolean; disabled?: boolean }): JSX.Element {
-  const theme = useGrokTheme();
+function Action(props: {
+  label: string;
+  kbd?: string;
+  onClick: () => void;
+  primary?: boolean;
+  disabled?: boolean;
+}): JSX.Element {
   return (
     <button
       type="button"
       onClick={props.onClick}
       disabled={props.disabled}
-      style={{
-        ...theme.font.label,
-        minHeight: 44,
-        padding: "0 18px",
-        borderRadius: theme.radius.full,
-        border: "1px solid " + (props.primary ? theme.border.strong : theme.border.default),
-        background: props.primary ? theme.bg.elevated : "transparent",
-        color: props.disabled ? theme.text.tertiary : theme.text.primary,
-        fontWeight: theme.weight.semibold,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.55 : 1,
-      }}
+      className={"ui-btn" + (props.primary ? " ui-btn-primary" : "")}
     >
-      {props.label}
+      <span>{props.label}</span>
+      {props.kbd ? (
+        <kbd className={"kbd" + (props.primary ? " kbd-on-primary" : "")}>{props.kbd}</kbd>
+      ) : null}
     </button>
   );
 }
 
-function KeyboardChart(): JSX.Element {
+function KeyboardChart(props: { activeKeys?: Set<string> }): JSX.Element {
   const theme = useGrokTheme();
-  const keyStyle = (wide?: boolean): CSSProperties => ({
-    flex: wide ? "1 1 0" : "0 1 auto",
-    minWidth: 0,
-    minHeight: 58,
-    padding: "6px 4px",
-    borderRadius: 10,
-    border: "1px solid " + theme.border.default,
-    background: theme.bg.elevated,
-    textAlign: "center",
-    boxSizing: "border-box",
-  });
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", minWidth: 0 }}>
+    <div className="kb-chart-wrap">
       {KB_ROWS.map((row, i) => (
         <div
           key={i}
+          className="kb-chart-row"
           style={{
-            display: "flex",
-            gap: 6,
-            justifyContent: "center",
             paddingLeft: i === 1 ? 12 : i === 2 ? 28 : 0,
             paddingRight: i === 1 ? 12 : i === 2 ? 28 : 0,
-            width: "100%",
-            boxSizing: "border-box",
-            minWidth: 0,
           }}
         >
           {row.map((k) => (
-            <div key={k} style={keyStyle(true)}>
-              <div style={{ ...theme.font.label, fontWeight: theme.weight.semibold, color: theme.text.accent }}>
-                {up(k)}
-              </div>
-              <div
-                style={{
-                  ...theme.font.caption,
-                  color: theme.text.secondary,
-                  marginTop: 2,
-                  overflowWrap: "anywhere",
-                  lineHeight: 1.35,
-                }}
-              >
-                {KEY_REPS[k]}
-              </div>
+            <div key={k} className={"kb-chart-key" + (props.activeKeys?.has(k) ? " is-active" : "")}>
+              <div className="kb-chart-letter">{up(k)}</div>
+              <div className="kb-chart-roots">{KEY_REPS[k]}</div>
             </div>
           ))}
         </div>
       ))}
-      <div style={{ display: "flex", gap: 6, width: "100%", minWidth: 0 }}>
+      <div className="kb-chart-row">
         {PUNCT.map((p) => (
-          <div key={p.key} style={keyStyle(true)}>
-            <div style={{ ...theme.font.label, fontWeight: theme.weight.semibold, color: theme.text.accent }}>
+          <div key={p.key} className="kb-chart-key">
+            <div className="kb-chart-letter">
               {p.key} {p.label}
             </div>
-            <div style={{ ...theme.font.caption, color: theme.text.secondary, marginTop: 2, overflowWrap: "anywhere" }}>
-              {p.note}
-            </div>
+            <div className="kb-chart-roots">{p.note}</div>
           </div>
         ))}
       </div>
@@ -625,11 +558,7 @@ function ShortCodeChart(props: { items: CharItem[]; tier: ShortTier }): JSX.Elem
             const sc = shortCodesOf(item).map(up).join("／");
             const fc = fullCodesOf(item).map(up).join("／");
             return (
-              <div
-                key={item.c}
-                className="short-table-card"
-                style={{ borderColor: theme.border.default, background: theme.bg.base }}
-              >
+              <div key={item.c} className="short-table-card">
                 <div className="short-table-char">{item.c}</div>
                 <div className="short-table-code" style={{ color: theme.text.accent }}>{sc}</div>
                 {fc ? (
@@ -645,7 +574,9 @@ function ShortCodeChart(props: { items: CharItem[]; tier: ShortTier }): JSX.Elem
 }
 
 export default function App(): JSX.Element {
-  const theme = useGrokTheme();
+  const { theme, themeId, colorMode, setThemeId, setColorMode, clearPreview } = useThemeControl();
+  const [themeOpen, setThemeOpen] = useState<boolean>(false);
+  const [animTick, setAnimTick] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const timerRef = useRef<number | null>(null);
 
@@ -817,12 +748,12 @@ export default function App(): JSX.Element {
   }, [mode, rootDir, diff, shortTier, review]);
 
   useEffect(() => {
-    if (isMobile) return;
+    if (isMobile || themeOpen) return;
     if (mode === "article" || mode === "lookup" || mode === "history") return;
     if (mode === "timed" && phase !== "run") return;
     const t = window.setTimeout(() => focusInput(), 40);
     return () => window.clearTimeout(t);
-  }, [mode, rootQ, charQ, phase, rootDir, shortTier, verdict, isMobile]);
+  }, [mode, rootQ, charQ, phase, rootDir, shortTier, verdict, isMobile, themeOpen]);
 
   useEffect(() => {
     return () => {
@@ -883,7 +814,11 @@ export default function App(): JSX.Element {
 
   function importBackup(data: BackupFile, how: ImportMode): void {
     const next = applyBackup(
-      { stats: { ok, tried, streak, missChars, missRoots }, history, settings: { autoNext } },
+      {
+        stats: { ok, tried, streak, missChars, missRoots },
+        history,
+        settings: { autoNext, theme: themeId, colorMode },
+      },
       data,
       how,
     );
@@ -893,7 +828,11 @@ export default function App(): JSX.Element {
     setMissChars(next.stats.missChars);
     setMissRoots(next.stats.missRoots);
     setHistory(next.history);
-    if (how === "replace") setAutoNext(next.settings.autoNext);
+    if (how === "replace") {
+      setAutoNext(next.settings.autoNext);
+      if (isThemeId(next.settings.theme)) setThemeId(next.settings.theme);
+      if (isColorMode(next.settings.colorMode)) setColorMode(next.settings.colorMode);
+    }
   }
 
   function markMissChar(ch: string): void {
@@ -905,6 +844,7 @@ export default function App(): JSX.Element {
   }
 
   function grade(correct: boolean): void {
+    setAnimTick((n) => n + 1);
     setTried((n) => n + 1);
     if (correct) {
       setOk((n) => n + 1);
@@ -1048,6 +988,12 @@ export default function App(): JSX.Element {
     const h = (ev: globalThis.KeyboardEvent): void => {
       if (ev.isComposing) return;
       const runTimed = mode === "timed" && phase === "run";
+      if (!isMobile && themeOpen && ev.key === "Escape") {
+        ev.preventDefault();
+        clearPreview();
+        setThemeOpen(false);
+        return;
+      }
       if (isMobile && (showSettings || showKb || showShortTable) && ev.key === "Escape") {
         ev.preventDefault();
         setShowSettings(false);
@@ -1057,6 +1003,14 @@ export default function App(): JSX.Element {
       }
       if (ev.altKey) {
         const c = ev.code;
+        if (c === "KeyP" && !isMobile) {
+          ev.preventDefault();
+          setThemeOpen((o) => {
+            if (o) clearPreview();
+            return !o;
+          });
+          return;
+        }
         let hit = true;
         if (c === "Digit1") switchMode("roots");
         else if (c === "Digit2") switchMode("chars");
@@ -1169,49 +1123,6 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener("keydown", h);
   });
 
-  const page: CSSProperties = {
-    minHeight: "100%",
-    background: theme.bg.base,
-    color: theme.text.primary,
-    fontFamily: theme.font.family,
-    boxSizing: "border-box",
-    padding: "20px 16px calc(24px + env(safe-area-inset-bottom))",
-  };
-  const wrap: CSSProperties = {
-    width: "100%",
-    maxWidth: 780,
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    gap: 16,
-    minWidth: 0,
-  };
-  const card: CSSProperties = {
-    background: theme.bg.elevated,
-    border: "1px solid " + theme.border.default,
-    borderRadius: 18,
-    padding: 18,
-    boxSizing: "border-box",
-    width: "100%",
-    minWidth: 0,
-  };
-  const inputStyle: CSSProperties = {
-    width: "100%",
-    maxWidth: 320,
-    minHeight: 48,
-    fontSize: 18,
-    letterSpacing: "0.14em",
-    textAlign: "center",
-    textTransform: "uppercase",
-    fontFamily: theme.font.family,
-    color: theme.text.primary,
-    background: theme.bg.base,
-    border: "1px solid " + theme.border.strong,
-    borderRadius: 12,
-    padding: "8px 12px",
-    boxSizing: "border-box",
-  };
-
   const busyTimed = mode === "timed" && phase === "run";
   const canReview =
     mode === "roots"
@@ -1219,6 +1130,20 @@ export default function App(): JSX.Element {
       : mode === "short"
         ? baseShortPool.some((x) => (missChars[x.c] ?? 0) > 0)
         : missedCharList.length > 0;
+
+  const activeKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const ch of typed.toLowerCase()) {
+      if (ch >= "a" && ch <= "z") s.add(ch);
+    }
+    if (verdict === "bad") {
+      if (mode === "roots" && rootQ) s.add(rootQ.key);
+      else if (charQ) {
+        for (const ch of charQ.k[0]) s.add(ch);
+      }
+    }
+    return s;
+  }, [typed, verdict, mode, rootQ, charQ]);
 
   let charExplain = "";
   if (charQ) {
@@ -1285,11 +1210,14 @@ export default function App(): JSX.Element {
     const header = (
       <header className="mobile-header">
         <div className="mobile-header-text">
-          <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
-          <div className="mobile-header-stats" style={{ color: theme.text.secondary }}>
+          <div className="mobile-brand-row">
+            <BrandMark size={26} />
+            <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
+          </div>
+          <div className="mobile-header-stats">
             {mode === "timed" && phase === "run"
               ? "剩餘 " + left + " 秒 · 已答對 " + tOk
-              : "連對 " + streak + " · 正確率 " + pct(ok, tried) + " · " + ok + " / " + tried}
+              : (streak >= 3 ? "🔥 " : "") + "連對 " + streak + " · 正確率 " + pct(ok, tried) + " · " + ok + " / " + tried}
           </div>
         </div>
         <IconGearButton theme={theme} onClick={() => setShowSettings(true)} />
@@ -1300,9 +1228,8 @@ export default function App(): JSX.Element {
       <div
         className={"mobile-typed" + (typed ? "" : " is-empty")}
         style={{
-          borderColor: theme.border.strong,
-          background: theme.bg.elevated,
-          color: theme.text.primary,
+          borderColor: verdict === "ok" ? theme.text.success : verdict === "bad" ? theme.text.danger : undefined,
+          background: verdict === "ok" ? theme.fill.successSoft : verdict === "bad" ? theme.fill.dangerSoft : undefined,
         }}
         aria-label={mode === "roots" ? "字根對應按鍵" : "嘸蝦米字碼"}
         data-testid="typed-display"
@@ -1310,6 +1237,9 @@ export default function App(): JSX.Element {
         {typed ? up(typed) : "點下面鍵盤輸入"}
       </div>
     );
+
+    const glyphAnimCls = (extra?: string): string =>
+      "mobile-glyph" + (verdict === "ok" ? " flash-ok" : verdict === "bad" ? " flash-bad" : "") + (extra ? " " + extra : "");
 
     let stageInner: JSX.Element;
     if (emptyReview) {
@@ -1324,7 +1254,9 @@ export default function App(): JSX.Element {
       stageInner = (
         <div className="mobile-q">
           <p className="mobile-caption">{rootQ.cat}</p>
-          <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")}>{rootQ.glyph}</div>
+          <div key={verdict === "idle" ? "idle" : "v-" + animTick} className={glyphAnimCls()}>
+            {rootQ.glyph}
+          </div>
           {typedBox}
           {hintOn || verdict !== "idle" ? (
             <p className="mobile-msg" style={{ color: theme.text.secondary }}>
@@ -1339,7 +1271,7 @@ export default function App(): JSX.Element {
             </p>
           ) : null}
           {verdict === "bad" ? (
-            <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold }}>
+            <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
               不對。正確答案是 {up(rootQ.key)} 鍵（{KEY_REPS[rootQ.key]}）。
             </p>
           ) : null}
@@ -1349,7 +1281,11 @@ export default function App(): JSX.Element {
       stageInner = (
         <div className="mobile-q">
           <p className="mobile-caption">這個鍵的字根是哪一個？</p>
-          <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")} style={{ color: theme.text.accent }}>
+          <div
+            key={verdict === "idle" ? "idle" : "v-" + animTick}
+            className={glyphAnimCls()}
+            style={{ color: theme.text.accent }}
+          >
             {up(rootQ.key)}
           </div>
           <div className="choice-grid">
@@ -1364,11 +1300,6 @@ export default function App(): JSX.Element {
                   className={"choice-btn" + (correct ? " is-correct" : "") + (wrong ? " is-wrong" : "")}
                   disabled={verdict !== "idle"}
                   onClick={() => pickChoice(ch)}
-                  style={{
-                    borderColor: theme.border.default,
-                    background: theme.bg.elevated,
-                    color: theme.text.primary,
-                  }}
                 >
                   <span className="choice-num">{i + 1}</span>
                   {ch.glyph}
@@ -1387,7 +1318,7 @@ export default function App(): JSX.Element {
             </p>
           ) : null}
           {verdict === "bad" ? (
-            <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold }}>
+            <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
               不對。{up(rootQ.key)} 鍵的字根是 {KEY_REPS[rootQ.key]} （此題正解 {rootQ.glyph}）。
             </p>
           ) : null}
@@ -1397,7 +1328,9 @@ export default function App(): JSX.Element {
       stageInner = (
         <div className="mobile-q">
           <p className="mobile-caption">教育部字頻第 {charQ.r} 字</p>
-          <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")}>{charQ.c}</div>
+          <div key={verdict === "idle" ? "idle" : "v-" + animTick} className={glyphAnimCls()}>
+            {charQ.c}
+          </div>
           {typedBox}
           {hintOn && verdict === "idle" ? (
             <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold }}>
@@ -1416,7 +1349,7 @@ export default function App(): JSX.Element {
             </p>
           ) : null}
           {verdict === "bad" ? (
-            <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold }}>
+            <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
               不對。{charExplain}
               <br />
               <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
@@ -1435,7 +1368,11 @@ export default function App(): JSX.Element {
           <p className="mobile-caption">
             {shortTierTitle(shortTier, shortPool.length)} · 教育部字頻第 {charQ.r} 字
           </p>
-          <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")} data-testid="short-glyph">
+          <div
+            key={verdict === "idle" ? "idle" : "v-" + animTick}
+            className={glyphAnimCls()}
+            data-testid="short-glyph"
+          >
             {charQ.c}
           </div>
           {typedBox}
@@ -1455,7 +1392,7 @@ export default function App(): JSX.Element {
               className="mobile-msg"
               data-testid="short-feedback"
               style={{
-                color: verdict === "ok" ? theme.text.success : theme.text.accent,
+                color: verdict === "ok" ? theme.text.success : theme.text.danger,
                 fontWeight: theme.weight.semibold,
               }}
             >
@@ -1481,7 +1418,15 @@ export default function App(): JSX.Element {
       } else if (phase === "run" && charQ) {
         stageInner = (
           <div className="mobile-q">
-            <div className={"mobile-glyph" + (verdict === "ok" ? " flash-ok" : "")}>{charQ.c}</div>
+            <div className="timed-bar-track" style={{ maxWidth: 240 }} aria-hidden="true">
+              <div
+                className={"timed-bar-fill" + (left <= 10 ? " is-urgent" : "")}
+                style={{ width: Math.max(0, Math.min(100, (left / 60) * 100)) + "%" }}
+              />
+            </div>
+            <div key={verdict === "idle" ? "idle" : "v-" + animTick} className={glyphAnimCls()}>
+              {charQ.c}
+            </div>
             {typedBox}
             {hintOn && verdict === "idle" ? (
               <p className="mobile-msg" style={{ color: theme.text.accent }}>第一碼是 {hintOf(charQ)}</p>
@@ -1490,7 +1435,7 @@ export default function App(): JSX.Element {
               <p className="mobile-msg" style={{ color: theme.text.success }}>{charExplain}</p>
             ) : null}
             {verdict === "bad" ? (
-              <p className="mobile-msg" style={{ color: theme.text.accent }}>
+              <p className="mobile-msg" style={{ color: theme.text.danger }}>
                 {charExplain}字根：{breakdown(charQ.k[0])}
               </p>
             ) : null}
@@ -1516,12 +1461,6 @@ export default function App(): JSX.Element {
       );
     }
 
-    const chipStyle = (on: boolean): CSSProperties => ({
-      borderColor: on ? theme.border.strong : theme.border.default,
-      background: on ? theme.bg.base : "transparent",
-      color: theme.text.primary,
-    });
-
     const settingsSheet = showSettings ? (
       <BottomSheet
         theme={theme}
@@ -1545,7 +1484,6 @@ export default function App(): JSX.Element {
                 key={v}
                 type="button"
                 className={"settings-chip" + (mode === v ? " is-on" : "")}
-                style={chipStyle(mode === v)}
                 onClick={() => switchMode(v)}
               >
                 {label}
@@ -1553,6 +1491,7 @@ export default function App(): JSX.Element {
             ))}
           </div>
         </div>
+        <MobileThemeSection />
         {mode === "article" || mode === "lookup" || mode === "history" ? null : (
         <div className="settings-block">
           <p className="settings-label">
@@ -1564,7 +1503,6 @@ export default function App(): JSX.Element {
                 <button
                   type="button"
                   className={"settings-chip" + (rootDir === "forward" ? " is-on" : "")}
-                  style={chipStyle(rootDir === "forward")}
                   onClick={() => setRootDir("forward")}
                 >
                   看字根打按鍵
@@ -1572,7 +1510,6 @@ export default function App(): JSX.Element {
                 <button
                   type="button"
                   className={"settings-chip" + (rootDir === "reverse" ? " is-on" : "")}
-                  style={chipStyle(rootDir === "reverse")}
                   onClick={() => setRootDir("reverse")}
                 >
                   看按鍵認字根
@@ -1586,7 +1523,6 @@ export default function App(): JSX.Element {
                     type="button"
                     data-testid={"short-tier-" + t.v}
                     className={"settings-chip" + (shortTier === t.v ? " is-on" : "")}
-                    style={chipStyle(shortTier === t.v)}
                     onClick={() => setShortTier(t.v)}
                   >
                     {t.label}
@@ -1600,7 +1536,6 @@ export default function App(): JSX.Element {
                     key={d.v}
                     type="button"
                     className={"settings-chip" + (diff === d.v ? " is-on" : "")}
-                    style={chipStyle(diff === d.v)}
                     disabled={busyTimed}
                     onClick={() => setDiff(d.v)}
                   >
@@ -1617,7 +1552,7 @@ export default function App(): JSX.Element {
           <button
             type="button"
             className={"settings-chip" + (review ? " is-on" : "")}
-            style={{ ...chipStyle(review), width: "100%" }}
+            style={{ width: "100%" }}
             disabled={!canReview && !review}
             onClick={() => setReview(!review)}
           >
@@ -1628,8 +1563,8 @@ export default function App(): JSX.Element {
           <button
             type="button"
             data-testid="short-table-toggle"
-            className="settings-chip"
-            style={{ ...chipStyle(showShortTable), width: "100%" }}
+            className={"settings-chip" + (showShortTable ? " is-on" : "")}
+            style={{ width: "100%" }}
             onClick={() => {
               setShowSettings(false);
               setShowShortTable(true);
@@ -1641,7 +1576,7 @@ export default function App(): JSX.Element {
           <button
             type="button"
             className="settings-chip"
-            style={{ ...chipStyle(false), width: "100%" }}
+            style={{ width: "100%" }}
             onClick={() => {
               setShowSettings(false);
               setShowKb(true);
@@ -1658,7 +1593,7 @@ export default function App(): JSX.Element {
           <button
             type="button"
             className="settings-chip"
-            style={{ ...chipStyle(false), width: "100%" }}
+            style={{ width: "100%", color: theme.text.danger }}
             onClick={clearRecords}
           >
             清除紀錄
@@ -1718,19 +1653,21 @@ export default function App(): JSX.Element {
         </div>
         )}
         <div className="settings-block">
-          <p className="settings-label">資料來源</p>
-          <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
-            字根對照行易官網字根總表 boshiamy.com/image/root_all.jpg（並參考 boshiamy.then.tw/radical）。
-            字碼取自 OpenVanilla 社群碼表 liu7.cin（github.com/rwu823/liu），並以 chinese-opendesktop/cin-tables 的 boshiamy.cin（liu57a）與維基百科「嘸蝦米輸入法」範例交叉核對。
-            常用字依教育部《常用語詞調查報告書》「字頻總表」BIAU1（language.moe.gov.tw/001/Upload/files/SITE_CONTENT/M0001/PIN/biau1.htm）前 1000 字；出題依字頻加權（權重＝出現頻次的平方根），越常用的字越常出現，最近 5 題不重複。這不是行易官方商業碼表，少數字可能和官蝦版本不同；簡碼以空白鍵可直接出字的最短碼為準。查碼的繁簡對照取自 OpenCC（github.com/BYVoid/OpenCC）的 TSCharacters／STCharacters 字表，Apache-2.0 授權。
-          </p>
+          <details className="sources-details">
+            <summary>資料來源與授權說明</summary>
+            <p className="sources-body">
+              字根對照行易官網字根總表 boshiamy.com/image/root_all.jpg（並參考 boshiamy.then.tw/radical）。
+              字碼取自 OpenVanilla 社群碼表 liu7.cin（github.com/rwu823/liu），並以 chinese-opendesktop/cin-tables 的 boshiamy.cin（liu57a）與維基百科「嘸蝦米輸入法」範例交叉核對。
+              常用字依教育部《常用語詞調查報告書》「字頻總表」BIAU1（language.moe.gov.tw/001/Upload/files/SITE_CONTENT/M0001/PIN/biau1.htm）前 1000 字；出題依字頻加權（權重＝出現頻次的平方根），越常用的字越常出現，最近 5 題不重複。這不是行易官方商業碼表，少數字可能和官蝦版本不同；簡碼以空白鍵可直接出字的最短碼為準。查碼的繁簡對照取自 OpenCC（github.com/BYVoid/OpenCC）的 TSCharacters／STCharacters 字表，Apache-2.0 授權。
+            </p>
+          </details>
         </div>
       </BottomSheet>
     ) : null;
 
     const chartSheet = showKb ? (
       <BottomSheet theme={theme} title="鍵盤字根表" onClose={() => setShowKb(false)} testId="root-chart-sheet">
-        <KeyboardChart />
+        <KeyboardChart activeKeys={activeKeys} />
       </BottomSheet>
     ) : null;
 
@@ -1754,7 +1691,7 @@ export default function App(): JSX.Element {
             isMobile
             history={history}
             stats={{ ok, tried, streak, missChars, missRoots }}
-            settings={{ autoNext }}
+            settings={{ autoNext, theme: themeId, colorMode }}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
             mobileSheets={
@@ -1888,109 +1825,112 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <div style={page}>
-
-      <div style={wrap}>
-        <header style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-          <h1 style={{ ...theme.font.heading1, margin: 0, fontWeight: theme.weight.semibold, overflowWrap: "anywhere" }}>
-            無蝦米練功房
-          </h1>
-          <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
-            幫你把荒廢好久的嘸蝦米練回來。鍵盤請切英文模式，大小寫都算，用空白鍵或 Enter 送出。練習紀錄存在這個裝置上，可到「紀錄」看每天歷程與進步圖表，也可匯出備份。
-          </p>
-        </header>
-
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-          {[
-            { label: "連對", value: String(streak) },
-            { label: "正確率", value: pct(ok, tried) },
-            { label: "答對 / 總題", value: ok + " / " + tried },
-          ].map((s) => (
-            <div
-              key={s.label}
-              style={{
-                flex: "1 1 120px",
-                minWidth: 0,
-                border: "1px solid " + theme.border.subtle,
-                borderRadius: 14,
-                padding: "10px 12px",
-                background: theme.bg.elevated,
-              }}
-            >
-              <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>{s.label}</div>
-              <div style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold, marginTop: 2 }}>{s.value}</div>
+    <div className="app-page">
+      <div className="app-wrap">
+        <header className="app-topbar">
+          <div className="app-brand">
+            <BrandMark size={38} />
+            <div className="app-brand-copy">
+              <h1 className="app-brand-title">無蝦米練功房</h1>
+              <p className="app-brand-sub">字根・常用字・簡碼・文章・查碼，英文模式直接練</p>
             </div>
-          ))}
-        </div>
-        <div>
-          <Action label="清除紀錄" onClick={clearRecords} />
-        </div>
+          </div>
+          <div className="app-topbar-right">
+            <div className="app-stats-strip">
+              <div className={"stat-pill" + (streak >= 10 ? " is-streak-hot" : streak >= 3 ? " is-streak-warm" : "")}>
+                <span className="stat-pill-label">{streak >= 3 ? "🔥 連對" : "連對"}</span>
+                <span className="stat-pill-val">{streak}</span>
+              </div>
+              <div className="stat-pill">
+                <span className="stat-pill-label">正確率</span>
+                <span className="stat-pill-val">{pct(ok, tried)}</span>
+              </div>
+              <div className="stat-pill">
+                <span className="stat-pill-label">答對 / 總題</span>
+                <span className="stat-pill-val">{ok} / {tried}</span>
+              </div>
+            </div>
+            <DesktopThemeBar open={themeOpen} onOpenChange={setThemeOpen} />
+          </div>
+        </header>
 
         <SegmentedControl
           value={mode}
           onChange={(v) => switchMode(v)}
           options={[
-            { value: "roots", label: "字根練習 ⌥1" },
-            { value: "chars", label: "常用字 ⌥2" },
-            { value: "timed", label: "限時挑戰 ⌥3" },
-            { value: "article", label: "文章練習 ⌥4" },
-            { value: "lookup", label: "查碼 ⌥5" },
-            { value: "history", label: "紀錄 ⌥6" },
-            { value: "short", label: "簡碼練習 ⌥7" },
+            { value: "roots", label: "字根練習", kbd: "⌥1" },
+            { value: "chars", label: "常用字", kbd: "⌥2" },
+            { value: "timed", label: "限時挑戰", kbd: "⌥3" },
+            { value: "article", label: "文章練習", kbd: "⌥4" },
+            { value: "lookup", label: "查碼", kbd: "⌥5" },
+            { value: "history", label: "紀錄", kbd: "⌥6" },
+            { value: "short", label: "簡碼練習", kbd: "⌥7" },
           ]}
         />
-        <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
-          快捷鍵：Enter 或空白鍵送出，答完再按一次跳下一題；/ 提示；Esc 跳過。⌥ 是 Option（Mac）或 Alt（紀錄 ⌥6、簡碼 ⌥7）。
-        </p>
 
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {mode === "article" || mode === "lookup" || mode === "history" ? null : mode === "short" ? (
-            <>
-              {SHORT_TIERS.map((t) => (
-                <Pill
-                  key={t.v}
-                  testId={"short-tier-" + t.v}
-                  label={t.label + " ⌥" + t.key}
-                  on={shortTier === t.v}
-                  onClick={() => setShortTier(t.v)}
-                />
-              ))}
-            </>
-          ) : mode !== "roots" ? (
-            <>
-              {DIFFS.map((d) => (
-                <Pill
-                  key={d.v}
-                  label={"前" + d.v + "字 ⌥" + d.key}
-                  on={diff === d.v}
-                  onClick={() => setDiff(d.v)}
-                  disabled={busyTimed}
-                />
-              ))}
-            </>
-          ) : (
-            <>
-              <Pill label="看字根打按鍵 ⌥Q" on={rootDir === "forward"} onClick={() => setRootDir("forward")} />
-              <Pill label="看按鍵認字根 ⌥W" on={rootDir === "reverse"} onClick={() => setRootDir("reverse")} />
-            </>
-          )}
-          {mode === "article" || mode === "lookup" || mode === "history" ? null : (
+        <div className="sub-toolbar">
+          <div className="sub-toolbar-group">
+            {mode === "article" || mode === "lookup" || mode === "history" ? null : mode === "short" ? (
+              <>
+                {SHORT_TIERS.map((t) => (
+                  <Pill
+                    key={t.v}
+                    testId={"short-tier-" + t.v}
+                    label={t.label}
+                    kbd={"⌥" + t.key}
+                    on={shortTier === t.v}
+                    onClick={() => setShortTier(t.v)}
+                  />
+                ))}
+              </>
+            ) : mode !== "roots" ? (
+              <>
+                {DIFFS.map((d) => (
+                  <Pill
+                    key={d.v}
+                    label={"前" + d.v + "字"}
+                    kbd={"⌥" + d.key}
+                    on={diff === d.v}
+                    onClick={() => setDiff(d.v)}
+                    disabled={busyTimed}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                <Pill label="看字根打按鍵" kbd="⌥Q" on={rootDir === "forward"} onClick={() => setRootDir("forward")} />
+                <Pill label="看按鍵認字根" kbd="⌥W" on={rootDir === "reverse"} onClick={() => setRootDir("reverse")} />
+              </>
+            )}
+            {mode === "article" || mode === "lookup" || mode === "history" ? null : (
+              <Pill
+                label="複習錯字"
+                kbd="⌥R"
+                on={review}
+                disabled={!canReview && !review}
+                onClick={() => setReview(!review)}
+              />
+            )}
+            {mode === "short" ? (
+              <Pill
+                testId="short-table-toggle"
+                label={showShortTable ? "收起簡碼表" : "開啟簡碼表"}
+                kbd="⌥J"
+                on={showShortTable}
+                onClick={() => setShowShortTable(!showShortTable)}
+              />
+            ) : null}
             <Pill
-              label="複習錯字 ⌥R"
-              on={review}
-              disabled={!canReview && !review}
-              onClick={() => setReview(!review)}
+              label={showKb ? "收起字根表" : "開啟字根表"}
+              kbd="⌥K"
+              on={showKb}
+              onClick={() => setShowKb(!showKb)}
             />
-          )}
-          {mode === "short" ? (
-            <Pill
-              testId="short-table-toggle"
-              label={showShortTable ? "收起簡碼表 ⌥J" : "開啟簡碼表 ⌥J"}
-              on={showShortTable}
-              onClick={() => setShowShortTable(!showShortTable)}
-            />
-          ) : null}
-          <Pill label={showKb ? "收起字根表 ⌥K" : "開啟字根表 ⌥K"} on={showKb} onClick={() => setShowKb(!showKb)} />
+          </div>
+          <p className="shortcut-hint">
+            <kbd className="kbd">Enter</kbd>／<kbd className="kbd">Space</kbd> 送出與下一題 ·{" "}
+            <kbd className="kbd">/</kbd> 提示 · <kbd className="kbd">Esc</kbd> 跳過
+          </p>
         </div>
 
         {review &&
@@ -2003,26 +1943,31 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "short" && showShortTable ? (
-          <section style={card}>
+          <section className="stage-card">
             <h2 style={{ ...theme.font.heading3, margin: "0 0 12px", fontWeight: theme.weight.semibold }}>簡碼速查表</h2>
             <ShortCodeChart items={baseShortPool} tier={shortTier} />
           </section>
         ) : null}
 
         {showKb ? (
-          <section style={card}>
+          <section className="stage-card">
             <h2 style={{ ...theme.font.heading3, margin: "0 0 12px", fontWeight: theme.weight.semibold }}>鍵盤字根表</h2>
-            <KeyboardChart />
+            <KeyboardChart activeKeys={activeKeys} />
           </section>
         ) : null}
 
         {mode === "roots" ? (
-          <section style={card}>
+          <section className="stage-card">
             {rootQ ? (
               rootDir === "forward" ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                  <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>{rootQ.cat}</div>
-                  <div style={{ fontSize: 72, lineHeight: 1, fontWeight: theme.weight.semibold }}>{rootQ.glyph}</div>
+                <div className="stage-center">
+                  <div className="stage-meta">{rootQ.cat}</div>
+                  <div
+                    key={verdict === "idle" ? "idle" : "v-" + animTick}
+                    className={"glyph-stage" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
+                  >
+                    {rootQ.glyph}
+                  </div>
                   <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
                     打出對應的英文鍵，按送出才會判斷。
                   </p>
@@ -2038,16 +1983,17 @@ export default function App(): JSX.Element {
                     lang="en"
                     inputMode="text"
                     maxLength={2}
-                    style={inputStyle}
+                    className={"code-input" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
                   />
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                    <Action label="送出 Enter" primary onClick={() => submitRoot(typed)} disabled={verdict !== "idle"} />
+                    <Action label="送出" kbd="Enter" primary onClick={() => submitRoot(typed)} disabled={verdict !== "idle"} />
                     <Action
-                      label="提示 /"
+                      label="提示"
+                      kbd="/"
                       onClick={() => setHintOn(true)}
                       disabled={verdict !== "idle"}
                     />
-                    <Action label="下一題 Esc" onClick={() => nextRoot(rootQ)} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot(rootQ)} />
                   </div>
                   {hintOn || verdict !== "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0, textAlign: "center" }}>
@@ -2061,46 +2007,44 @@ export default function App(): JSX.Element {
                   ) : null}
                   {verdict === "bad" ? (
                     <div style={{ textAlign: "center" }}>
-                      <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0, fontWeight: theme.weight.semibold }}>
+                      <p style={{ ...theme.font.body1, color: theme.text.danger, margin: 0, fontWeight: theme.weight.semibold }}>
                         不對。正確答案是 {up(rootQ.key)} 鍵（{KEY_REPS[rootQ.key]}）。
                       </p>
                     </div>
                   ) : null}
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                  <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>這個鍵的字根是哪一個？</p>
-                  <div style={{ fontSize: 64, lineHeight: 1, fontWeight: theme.weight.semibold, color: theme.text.accent }}>
+                <div className="stage-center">
+                  <div className="stage-meta">看按鍵認字根</div>
+                  <div
+                    key={verdict === "idle" ? "idle" : "v-" + animTick}
+                    className={"glyph-stage is-reverse" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
+                  >
                     {rootQ ? up(rootQ.key) : ""}
                   </div>
-                  <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>按 1–4 選答案。</p>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", width: "100%" }}>
-                    {choices.map((ch, i) => (
-                      <button
-                        key={rootId(ch) + ch.cat}
-                        type="button"
-                        disabled={verdict !== "idle"}
-                        onClick={() => pickChoice(ch)}
-                        style={{
-                          width: 72,
-                          minHeight: 72,
-                          fontSize: 28,
-                          borderRadius: 14,
-                          border: "1px solid " + theme.border.default,
-                          background: theme.bg.base,
-                          color: theme.text.primary,
-                          cursor: verdict === "idle" ? "pointer" : "default",
-                          fontWeight: theme.weight.semibold,
-                        }}
-                      >
-                        <div style={{ fontSize: 12, color: theme.text.tertiary, lineHeight: 1 }}>{i + 1}</div>
-                        {ch.glyph}
-                      </button>
-                    ))}
+                  <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>按 1–4 選對應字根。</p>
+                  <div className="desktop-choice-grid">
+                    {choices.map((ch, i) => {
+                      const id = rootId(ch);
+                      const correct = verdict !== "idle" && ch.key === rootQ.key;
+                      const wrong = verdict === "bad" && pickedId === id && !correct;
+                      return (
+                        <button
+                          key={id + ch.cat}
+                          type="button"
+                          className={"desktop-choice-btn" + (correct ? " is-correct" : "") + (wrong ? " is-wrong" : "")}
+                          disabled={verdict !== "idle"}
+                          onClick={() => pickChoice(ch)}
+                        >
+                          <div style={{ fontSize: 11, color: theme.text.tertiary, lineHeight: 1 }}>{i + 1}</div>
+                          {ch.glyph}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                    <Action label="提示 /" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                    <Action label="下一題 Esc" onClick={() => nextRoot(rootQ)} />
+                    <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot(rootQ)} />
                   </div>
                   {hintOn && verdict === "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0, textAlign: "center" }}>
@@ -2113,7 +2057,7 @@ export default function App(): JSX.Element {
                     </p>
                   ) : null}
                   {verdict === "bad" ? (
-                    <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0, fontWeight: theme.weight.semibold, textAlign: "center" }}>
+                    <p style={{ ...theme.font.body1, color: theme.text.danger, margin: 0, fontWeight: theme.weight.semibold, textAlign: "center" }}>
                       不對。{up(rootQ.key)} 鍵的字根是 {KEY_REPS[rootQ.key]} （此題正解 {rootQ.glyph}）。
                     </p>
                   ) : null}
@@ -2126,11 +2070,16 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "chars" ? (
-          <section style={card}>
+          <section className="stage-card">
             {charQ ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>教育部字頻第 {charQ.r} 字</div>
-                <div style={{ fontSize: 80, lineHeight: 1, fontWeight: theme.weight.semibold }}>{charQ.c}</div>
+              <div className="stage-center">
+                <div className="stage-meta">教育部字頻第 {charQ.r} 字</div>
+                <div
+                  key={verdict === "idle" ? "idle" : "v-" + animTick}
+                  className={"glyph-stage" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
+                >
+                  {charQ.c}
+                </div>
                 <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0, textAlign: "center" }}>
                   輸入字碼後按送出。有簡碼先記簡碼，全碼也算對。
                 </p>
@@ -2146,12 +2095,12 @@ export default function App(): JSX.Element {
                   lang="en"
                   inputMode="text"
                   maxLength={6}
-                  style={inputStyle}
+                  className={"code-input" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
                 />
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                  <Action label="送出 Enter" primary onClick={() => submitChar(typed, false)} disabled={verdict !== "idle"} />
-                  <Action label="提示 /" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                  <Action label="下一題 Esc" onClick={() => nextChar(charQ)} />
+                  <Action label="送出" kbd="Enter" primary onClick={() => submitChar(typed, false)} disabled={verdict !== "idle"} />
+                  <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
+                  <Action label="下一題" kbd="Esc" onClick={() => nextChar(charQ)} />
                 </div>
                 {hintOn && verdict === "idle" ? (
                   <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }}>第一碼是 {hintOf(charQ)}</p>
@@ -2168,7 +2117,7 @@ export default function App(): JSX.Element {
                 ) : null}
                 {verdict === "bad" ? (
                   <div style={{ textAlign: "center", maxWidth: 520 }}>
-                    <p style={{ ...theme.font.body1, color: theme.text.accent, margin: "0 0 6px", fontWeight: theme.weight.semibold }}>
+                    <p style={{ ...theme.font.body1, color: theme.text.danger, margin: "0 0 6px", fontWeight: theme.weight.semibold }}>
                       不對。{charExplain}
                     </p>
                     <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
@@ -2185,16 +2134,20 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "short" ? (
-          <section style={card} data-testid="short-stage">
+          <section className="stage-card" data-testid="short-stage">
             {charQ ? (() => {
               const sc0 = shortCodesOf(charQ)[0] ?? charQ.k[0];
               const fc0 = fullCodesOf(charQ)[0];
               return (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                  <div style={{ ...theme.font.caption, color: theme.text.tertiary }}>
+                <div className="stage-center">
+                  <div className="stage-meta">
                     {shortTierTitle(shortTier, shortPool.length)} · 教育部字頻第 {charQ.r} 字
                   </div>
-                  <div style={{ fontSize: 80, lineHeight: 1, fontWeight: theme.weight.semibold }} data-testid="short-glyph">
+                  <div
+                    key={verdict === "idle" ? "idle" : "v-" + animTick}
+                    className={"glyph-stage" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
+                    data-testid="short-glyph"
+                  >
                     {charQ.c}
                   </div>
                   <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0, textAlign: "center" }}>
@@ -2212,12 +2165,12 @@ export default function App(): JSX.Element {
                     lang="en"
                     inputMode="text"
                     maxLength={6}
-                    style={inputStyle}
+                    className={"code-input" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
                   />
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                    <Action label="送出 Enter" primary onClick={() => submitShort(typed)} disabled={verdict !== "idle"} />
-                    <Action label="提示 /" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                    <Action label="下一題 Esc" onClick={() => nextShort(charQ)} />
+                    <Action label="送出" kbd="Enter" primary onClick={() => submitShort(typed)} disabled={verdict !== "idle"} />
+                    <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextShort(charQ)} />
                   </div>
                   {hintOn && verdict === "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }} data-testid="short-hint">
@@ -2229,7 +2182,7 @@ export default function App(): JSX.Element {
                       <p
                         style={{
                           ...theme.font.body1,
-                          color: verdict === "ok" ? theme.text.success : theme.text.accent,
+                          color: verdict === "ok" ? theme.text.success : theme.text.danger,
                           margin: "0 0 6px",
                           fontWeight: theme.weight.semibold,
                         }}
@@ -2251,19 +2204,19 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "lookup" ? (
-          <Suspense fallback={<section style={card}>載入中…</section>}>
+          <Suspense fallback={<section className="stage-card">載入中…</section>}>
             <LookupMode theme={theme} isMobile={false} reps={KEY_REPS} onOpenSettings={() => undefined} />
           </Suspense>
         ) : null}
 
         {mode === "history" ? (
-          <Suspense fallback={<section style={card}>載入中…</section>}>
+          <Suspense fallback={<section className="stage-card">載入中…</section>}>
             <HistoryMode
               theme={theme}
               isMobile={false}
               history={history}
               stats={{ ok, tried, streak, missChars, missRoots }}
-              settings={{ autoNext }}
+              settings={{ autoNext, theme: themeId, colorMode }}
               onOpenSettings={() => undefined}
               onImport={importBackup}
             />
@@ -2271,7 +2224,7 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "article" ? (
-          <Suspense fallback={<section style={card}>載入中…</section>}>
+          <Suspense fallback={<section className="stage-card">載入中…</section>}>
             <ArticleMode
               theme={theme}
               isMobile={false}
@@ -2289,22 +2242,44 @@ export default function App(): JSX.Element {
         ) : null}
 
         {mode === "timed" ? (
-          <section style={card}>
+          <section className="stage-card">
             {phase === "idle" ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, textAlign: "center" }}>
+              <div className="stage-center">
+                <div className="stage-meta">60 秒限時挑戰</div>
                 <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
                   60 秒限時，練教育部字頻前 {diff} 字。結束會看得分、正確率和每分鐘字數。
                 </p>
-                <Action label="開始挑戰 Enter" primary onClick={startTimed} />
+                <Action label="開始挑戰" kbd="Enter" primary onClick={startTimed} />
               </div>
             ) : null}
             {phase === "run" && charQ ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center" }}>
-                  <span style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold }}>剩餘 {left} 秒</span>
-                  <span style={{ ...theme.font.body1, color: theme.text.secondary }}>已答對 {tOk}</span>
+              <div className="stage-center">
+                <div className="timed-hud">
+                  <div className="timed-hud-row">
+                    <span
+                      style={{
+                        ...theme.font.heading3,
+                        fontWeight: theme.weight.semibold,
+                        color: left <= 10 ? theme.text.danger : theme.text.primary,
+                      }}
+                    >
+                      剩餘 {left} 秒
+                    </span>
+                    <span style={{ ...theme.font.body1, color: theme.text.secondary }}>已答對 {tOk}</span>
+                  </div>
+                  <div className="timed-bar-track" aria-hidden="true">
+                    <div
+                      className={"timed-bar-fill" + (left <= 10 ? " is-urgent" : "")}
+                      style={{ width: Math.max(0, Math.min(100, (left / 60) * 100)) + "%" }}
+                    />
+                  </div>
                 </div>
-                <div style={{ fontSize: 80, lineHeight: 1, fontWeight: theme.weight.semibold }}>{charQ.c}</div>
+                <div
+                  key={verdict === "idle" ? "idle" : "v-" + animTick}
+                  className={"glyph-stage" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
+                >
+                  {charQ.c}
+                </div>
                 <input
                   ref={inputRef}
                   value={typed}
@@ -2317,11 +2292,11 @@ export default function App(): JSX.Element {
                   lang="en"
                   inputMode="text"
                   maxLength={6}
-                  style={inputStyle}
+                  className={"code-input" + (verdict === "ok" ? " is-ok" : verdict === "bad" ? " is-bad" : "")}
                 />
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
-                  <Action label="送出 Enter" primary onClick={() => submitChar(typed, true)} disabled={verdict !== "idle"} />
-                  <Action label="提示 /" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
+                  <Action label="送出" kbd="Enter" primary onClick={() => submitChar(typed, true)} disabled={verdict !== "idle"} />
+                  <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
                 </div>
                 {hintOn && verdict === "idle" ? (
                   <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }}>第一碼是 {hintOf(charQ)}</p>
@@ -2330,26 +2305,26 @@ export default function App(): JSX.Element {
                   <p style={{ ...theme.font.body1, color: theme.text.success, margin: 0 }}>{charExplain}</p>
                 ) : null}
                 {verdict === "bad" ? (
-                  <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0, textAlign: "center" }}>
+                  <p style={{ ...theme.font.body1, color: theme.text.danger, margin: 0, textAlign: "center" }}>
                     {charExplain}字根：{breakdown(charQ.k[0])}
                   </p>
                 ) : null}
               </div>
             ) : null}
             {phase === "over" ? (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, textAlign: "center" }}>
+              <div className="stage-center">
                 <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>時間到！</h2>
                 <p style={{ ...theme.font.body1, margin: 0 }}>
                   得分 {tOk} ，正確率 {pct(tOk, tTried)} ，{tOk} 字／分。
                 </p>
-                <Action label="再來一次 Enter" primary onClick={startTimed} />
+                <Action label="再來一次" kbd="Enter" primary onClick={startTimed} />
               </div>
             ) : null}
           </section>
         ) : null}
 
         {mode === "lookup" || mode === "history" ? null : (
-        <section style={card}>
+        <section className="stage-card">
           <h2 style={{ ...theme.font.heading3, margin: "0 0 8px", fontWeight: theme.weight.semibold }}>這輪最常錯的</h2>
           {mode === "roots" ? (
             missedRootList.length === 0 ? (
@@ -2400,14 +2375,19 @@ export default function App(): JSX.Element {
         </section>
         )}
 
-        <section>
-          <h2 style={{ ...theme.font.heading3, margin: "0 0 8px", fontWeight: theme.weight.semibold }}>資料來源</h2>
-          <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
-            字根對照行易官網字根總表 boshiamy.com/image/root_all.jpg（並參考 boshiamy.then.tw/radical）。
-            字碼取自 OpenVanilla 社群碼表 liu7.cin（github.com/rwu823/liu），並以 chinese-opendesktop/cin-tables 的 boshiamy.cin（liu57a）與維基百科「嘸蝦米輸入法」範例交叉核對。
-            常用字依教育部《常用語詞調查報告書》「字頻總表」BIAU1（language.moe.gov.tw/001/Upload/files/SITE_CONTENT/M0001/PIN/biau1.htm）前 1000 字；出題依字頻加權（權重＝出現頻次的平方根），越常用的字越常出現，最近 5 題不重複。這不是行易官方商業碼表，少數字可能和官蝦版本不同；簡碼以空白鍵可直接出字的最短碼為準。查碼的繁簡對照取自 OpenCC（github.com/BYVoid/OpenCC）的 TSCharacters／STCharacters 字表，Apache-2.0 授權。
-          </p>
-        </section>
+        <footer className="footer-bar">
+          <details className="sources-details">
+            <summary>資料來源與授權說明</summary>
+            <p className="sources-body">
+              字根對照行易官網字根總表 boshiamy.com/image/root_all.jpg（並參考 boshiamy.then.tw/radical）。
+              字碼取自 OpenVanilla 社群碼表 liu7.cin（github.com/rwu823/liu），並以 chinese-opendesktop/cin-tables 的 boshiamy.cin（liu57a）與維基百科「嘸蝦米輸入法」範例交叉核對。
+              常用字依教育部《常用語詞調查報告書》「字頻總表」BIAU1（language.moe.gov.tw/001/Upload/files/SITE_CONTENT/M0001/PIN/biau1.htm）前 1000 字；出題依字頻加權（權重＝出現頻次的平方根），越常用的字越常出現，最近 5 題不重複。這不是行易官方商業碼表，少數字可能和官蝦版本不同；簡碼以空白鍵可直接出字的最短碼為準。查碼的繁簡對照取自 OpenCC（github.com/BYVoid/OpenCC）的 TSCharacters／STCharacters 字表，Apache-2.0 授權。
+            </p>
+          </details>
+          <button type="button" className="ui-btn ui-btn-ghost" onClick={clearRecords}>
+            清除紀錄
+          </button>
+        </footer>
       </div>
     </div>
   );
