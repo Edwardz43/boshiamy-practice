@@ -1668,6 +1668,96 @@ html.mobile-practice #root {
   overflow-wrap: anywhere;
 }
 
+/* 簡體拆碼提示條 */
+.simp-hint-box {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 10px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  max-width: 100%;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-subtle);
+  background: var(--fill-accent-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+.simp-hint-box.is-compact {
+  margin-top: 6px;
+  padding: 4px 10px;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+.simp-hint-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--fill-primary-soft);
+  color: var(--text-accent);
+  white-space: nowrap;
+}
+.simp-hint-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+.simp-hint-item {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+}
+.simp-hint-glyph {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.simp-hint-box.is-compact .simp-hint-glyph {
+  font-size: 15px;
+}
+.simp-hint-select {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.simp-hint-code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-accent);
+}
+.simp-hint-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.simp-hint-roots {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.simp-hint-box.is-compact .simp-hint-roots {
+  font-size: 11px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -16,8 +16,8 @@
 - **授權與資料檔**：`public/liu-table.json`、`public/opencc-chars.json` 與 `public/opencc-LICENSE.txt`（Apache-2.0）不可刪除；重建繁簡表請用 `node scripts/build-opencc.mjs`。
 - **發佈前驗證**：
   1. 建置：`npm run build`（含 `tsc --noEmit` 與 `vite build`）。
-  2. 邏輯測試：`node test-lookup.mjs`、`node test-short.mjs`、`node test-history.mjs`。
-  3. UI／CSP 測試：先啟動 `npx vite preview --host 127.0.0.1 --port 4180 --strictPort`，再執行 `node test-csp.mjs`、`node test-lookup-ui.mjs`、`node test-history-ui.mjs`、`node test-article.mjs`、`node test-short-ui.mjs`、`node test-theme-ui.mjs`。
+  2. 邏輯測試：`node test-lookup.mjs`、`node test-short.mjs`、`node test-history.mjs`、`node test-simplified.mjs`。
+  3. UI／CSP 測試：先啟動 `npx vite preview --host 127.0.0.1 --port 4180 --strictPort`，再執行 `node test-csp.mjs`、`node test-lookup-ui.mjs`、`node test-history-ui.mjs`、`node test-article.mjs`、`node test-short-ui.mjs`、`node test-theme-ui.mjs`、`node test-simplified-ui.mjs`。
 
 ## 分支與部署規則
 

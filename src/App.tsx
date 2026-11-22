@@ -38,6 +38,8 @@ import {
   shortHintText,
   shortTierTitle,
 } from "./shortLogic";
+import { getSimplifiedHints } from "./simplifiedLogic";
+import { SimpHintBar } from "./SimpHintBar";
 
 // 文章練習 is split into its own chunk; its code table (liu-table.json) loads only when the mode opens.
 const ArticleMode = lazy(() => import("./ArticleMode"));
@@ -1145,6 +1147,8 @@ export default function App(): JSX.Element {
     return s;
   }, [typed, verdict, mode, rootQ, charQ]);
 
+  const charSimpHints = useMemo(() => (charQ ? getSimplifiedHints(charQ.c) : []), [charQ]);
+
   let charExplain = "";
   if (charQ) {
     const shorts = charQ.k.filter((x) => x.length <= 2);
@@ -1340,23 +1344,37 @@ export default function App(): JSX.Element {
             <p className="mobile-caption">輸入字碼後按送出。有簡碼先記簡碼，全碼也算對。</p>
           ) : null}
           {verdict === "ok" ? (
-            <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
-              答對了。{charExplain}
-              <br />
-              <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
-                字根：{breakdown(charQ.k[0])}
-              </span>
-            </p>
+            <div style={{ textAlign: "center" }}>
+              <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
+                答對了。{charExplain}
+                <br />
+                <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
+                  字根：{breakdown(charQ.k[0])}
+                </span>
+              </p>
+              <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} compact />
+            </div>
           ) : null}
           {verdict === "bad" ? (
-            <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
-              不對。{charExplain}
-              <br />
-              <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
-                字根：{breakdown(charQ.k[0])}
-                {charQ.k[1] ? " 　另一碼：" + breakdown(charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : ""}
-              </span>
-            </p>
+            <div style={{ textAlign: "center" }}>
+              <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
+                不對。{charExplain}
+                <br />
+                <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
+                  字根：{breakdown(charQ.k[0])}
+                  {charQ.k[1] ? " 　另一碼：" + breakdown(charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : ""}
+                </span>
+              </p>
+              <SimpHintBar
+                hints={charSimpHints}
+                reps={KEY_REPS}
+                shownCodes={[
+                  charQ.k[0],
+                  ...(charQ.k[1] ? [charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]] : []),
+                ]}
+                compact
+              />
+            </div>
           ) : null}
         </div>
       );
@@ -1388,21 +1406,28 @@ export default function App(): JSX.Element {
             <p className="mobile-caption">這題只收簡碼（1～2 鍵）；如果不小心打出全碼，系統會提醒你簡碼。</p>
           ) : null}
           {verdict !== "idle" && shortGrade ? (
-            <p
-              className="mobile-msg"
-              data-testid="short-feedback"
-              style={{
-                color: verdict === "ok" ? theme.text.success : theme.text.danger,
-                fontWeight: theme.weight.semibold,
-              }}
-            >
-              {shortFeedbackMsg}
-              <br />
-              <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
-                簡碼字根：{breakdown(sc0)}
-                {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
-              </span>
-            </p>
+            <div data-testid="short-feedback" style={{ textAlign: "center" }}>
+              <p
+                className="mobile-msg"
+                style={{
+                  color: verdict === "ok" ? theme.text.success : theme.text.danger,
+                  fontWeight: theme.weight.semibold,
+                }}
+              >
+                {shortFeedbackMsg}
+                <br />
+                <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
+                  簡碼字根：{breakdown(sc0)}
+                  {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
+                </span>
+              </p>
+              <SimpHintBar
+                hints={charSimpHints}
+                reps={KEY_REPS}
+                shownCodes={!shortGrade.ok && fc0 ? [sc0, fc0] : [sc0]}
+                compact
+              />
+            </div>
           ) : null}
         </div>
       );
@@ -2113,6 +2138,7 @@ export default function App(): JSX.Element {
                     <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
                       字根：{breakdown(charQ.k[0])}
                     </p>
+                    <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} />
                   </div>
                 ) : null}
                 {verdict === "bad" ? (
@@ -2124,6 +2150,14 @@ export default function App(): JSX.Element {
                       字根：{breakdown(charQ.k[0])}
                       {charQ.k[1] ? " 　另一碼：" + breakdown(charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : ""}
                     </p>
+                    <SimpHintBar
+                      hints={charSimpHints}
+                      reps={KEY_REPS}
+                      shownCodes={[
+                        charQ.k[0],
+                        ...(charQ.k[1] ? [charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]] : []),
+                      ]}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -2193,6 +2227,11 @@ export default function App(): JSX.Element {
                         簡碼字根：{breakdown(sc0)}
                         {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
                       </p>
+                      <SimpHintBar
+                        hints={charSimpHints}
+                        reps={KEY_REPS}
+                        shownCodes={!shortGrade.ok && fc0 ? [sc0, fc0] : [sc0]}
+                      />
                     </div>
                   ) : null}
                 </div>

@@ -4,6 +4,9 @@ import { OnScreenKeyboard } from "./OnScreenKeyboard";
 import { IconGearButton, MobileShell } from "./MobileChrome";
 import { BrandMark } from "./ThemePicker";
 import { WIKI_URL, pickArticle, type Article, type Table } from "./articleText";
+import type { Variants } from "./lookupLogic";
+import { getSimplifiedHints } from "./simplifiedLogic";
+import { SimpHintBar } from "./SimpHintBar";
 
 type Status = "loading" | "error" | "ready" | "done";
 type Mark = "ok" | "bad" | "skip";
@@ -22,6 +25,23 @@ function loadTable(): Promise<Table> {
       });
   }
   return tablePromise;
+}
+
+let variantsPromise: Promise<Variants | null> | null = null;
+// 繁簡對照 is a nice-to-have: if it fails to load, 文章練習 still works without it.
+function loadVariants(): Promise<Variants | null> {
+  if (!variantsPromise) {
+    variantsPromise = fetch("./opencc-chars.json")
+      .then((r) => {
+        if (!r.ok) throw new Error("variants " + r.status);
+        return r.json() as Promise<Variants>;
+      })
+      .catch(() => {
+        variantsPromise = null;
+        return null;
+      });
+  }
+  return variantsPromise;
 }
 
 async function fetchArticle(table: Table): Promise<Article> {
@@ -74,8 +94,10 @@ export default function ArticleMode(props: {
   const [flash, setFlash] = useState<number>(-1);
   const [t0, setT0] = useState<number | null>(null);
   const [t1, setT1] = useState<number | null>(null);
+  const [vars, setVars] = useState<Variants | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const curRef = useRef<HTMLSpanElement | null>(null);
+  const tableRef = useRef<Table | null>(null);
   const reqId = useRef(0);
   const lastMarkAt = useRef<number | null>(null);
 
@@ -102,9 +124,13 @@ export default function ArticleMode(props: {
     const id = ++reqId.current;
     setStatus("loading");
     setErrMsg("");
+    void loadVariants().then((v) => {
+      if (v) setVars(v);
+    });
     let table: Table;
     try {
       table = await loadTable();
+      tableRef.current = table;
     } catch {
       if (id !== reqId.current) return;
       setErrMsg("碼表載入失敗。請確認網路後重試；載入過一次之後離線也能查碼。");
@@ -138,6 +164,7 @@ export default function ArticleMode(props: {
   }, []);
 
   const cur = art && idx >= 0 ? art.segs[idx] : null;
+  const curSimpHints = useMemo(() => (cur ? getSimplifiedHints(cur.c, tableRef.current, vars) : []), [cur, vars]);
 
   const stats = useMemo(() => {
     const vals = Object.values(marks);
@@ -360,19 +387,27 @@ export default function ArticleMode(props: {
   const curMsg =
     cur && cur.k ? (
       bad ? (
-        <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold, margin: 0 }}>
-          不對。「{cur.c}」的字碼是 {fmt(cur.k)}
-          {cur.a && cur.a.length ? "（要選字：" + fmt(cur.a) + "）" : ""}
-          <br />
-          <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
-            字根：
-            {cur.k[0]
-              .split("")
-              .map((ch) => up(ch) + "　" + (props.reps[ch] ?? ""))
-              .join("；")}
-            。按{isMobile ? "「下一字」" : "空白鍵或 Enter"}繼續。
-          </span>
-        </p>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+          <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold, margin: 0 }}>
+            不對。「{cur.c}」的字碼是 {fmt(cur.k)}
+            {cur.a && cur.a.length ? "（要選字：" + fmt(cur.a) + "）" : ""}
+            <br />
+            <span style={{ color: theme.text.secondary, fontWeight: theme.weight.regular, fontSize: 12 }}>
+              字根：
+              {cur.k[0]
+                .split("")
+                .map((ch) => up(ch) + "　" + (props.reps[ch] ?? ""))
+                .join("；")}
+              。按{isMobile ? "「下一字」" : "空白鍵或 Enter"}繼續。
+            </span>
+          </p>
+          <SimpHintBar
+            hints={curSimpHints}
+            reps={props.reps}
+            shownCodes={cur.k[0] ? [cur.k[0]] : []}
+            compact={isMobile}
+          />
+        </div>
       ) : hintOn ? (
         <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold, margin: 0 }}>
           第一碼是 {hintOf(cur.k)}
