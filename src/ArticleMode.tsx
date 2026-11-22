@@ -7,6 +7,7 @@ import { WIKI_URL, pickArticle, type Article, type Table } from "./articleText";
 import type { Variants } from "./lookupLogic";
 import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
+import { KeycapBreakdown } from "./KeycapBreakdown";
 
 type Status = "loading" | "error" | "ready" | "done";
 type Mark = "ok" | "bad" | "skip";
@@ -79,7 +80,9 @@ export default function ArticleMode(props: {
   sheetOpen: boolean;
   onMiss: (ch: string) => void;
   onAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onActiveChange?: (info: { code: string; hintOn: boolean; bad: boolean; typed: string }) => void;
   onOpenSettings: () => void;
+  mobileModeStrip?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
@@ -165,6 +168,16 @@ export default function ArticleMode(props: {
 
   const cur = art && idx >= 0 ? art.segs[idx] : null;
   const curSimpHints = useMemo(() => (cur ? getSimplifiedHints(cur.c, tableRef.current, vars) : []), [cur, vars]);
+
+  useEffect(() => {
+    props.onActiveChange?.({
+      code: cur && cur.k ? cur.k[0] : "",
+      hintOn,
+      bad,
+      typed,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cur, hintOn, bad, typed]);
 
   const stats = useMemo(() => {
     const vals = Object.values(marks);
@@ -401,6 +414,13 @@ export default function ArticleMode(props: {
               。按{isMobile ? "「下一字」" : "空白鍵或 Enter"}繼續。
             </span>
           </p>
+          <KeycapBreakdown
+            code={cur.k[0]}
+            typedCode={typed}
+            verdict="bad"
+            reps={props.reps}
+            compact={isMobile}
+          />
           <SimpHintBar
             hints={curSimpHints}
             reps={props.reps}
@@ -560,6 +580,7 @@ export default function ArticleMode(props: {
         theme={theme}
         answer={cur && cur.k ? cur.k[0] : ""}
         header={header}
+        modeStrip={props.mobileModeStrip}
         stage={stage}
         footer={footer}
         sheets={props.mobileSheets}

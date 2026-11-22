@@ -10,7 +10,7 @@ import {
 import { isColorMode, isThemeId, useGrokTheme, useThemeControl } from "./theme";
 import { useIsMobile } from "./useIsMobile";
 import { OnScreenKeyboard } from "./OnScreenKeyboard";
-import { BottomSheet, IconGearButton, MobileShell, ToggleRow } from "./MobileChrome";
+import { BottomSheet, IconGearButton, MobileModeStrip, MobileShell, ToggleRow } from "./MobileChrome";
 import { BrandMark, DesktopThemeBar, MobileThemeSection, ModeIcon, type NavMode } from "./ThemePicker";
 import {
   type BackupFile,
@@ -40,6 +40,7 @@ import {
 } from "./shortLogic";
 import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
+import { KeycapBreakdown } from "./KeycapBreakdown";
 
 // 文章練習 is split into its own chunk; its code table (liu-table.json) loads only when the mode opens.
 const ArticleMode = lazy(() => import("./ArticleMode"));
@@ -502,39 +503,62 @@ function Action(props: {
   );
 }
 
-function KeyboardChart(props: { activeKeys?: Set<string> }): JSX.Element {
+function KeyboardChart(props: {
+  activeKeys?: Set<string>;
+  stepMap?: Map<string, number[]>;
+  stepKind?: "hint" | "ok" | "bad";
+  compact?: boolean;
+}): JSX.Element {
   const theme = useGrokTheme();
   return (
-    <div className="kb-chart-wrap">
+    <div className={"kb-chart-wrap" + (props.compact ? " is-compact" : "")} data-testid="keyboard-chart">
       {KB_ROWS.map((row, i) => (
         <div
           key={i}
           className="kb-chart-row"
           style={{
-            paddingLeft: i === 1 ? 12 : i === 2 ? 28 : 0,
-            paddingRight: i === 1 ? 12 : i === 2 ? 28 : 0,
+            paddingLeft: i === 1 ? 10 : i === 2 ? 22 : 0,
+            paddingRight: i === 1 ? 10 : i === 2 ? 22 : 0,
           }}
         >
-          {row.map((k) => (
-            <div key={k} className={"kb-chart-key" + (props.activeKeys?.has(k) ? " is-active" : "")}>
-              <div className="kb-chart-letter">{up(k)}</div>
-              <div className="kb-chart-roots">{KEY_REPS[k]}</div>
+          {row.map((k) => {
+            const steps = props.stepMap?.get(k);
+            const hasStep = steps != null && steps.length > 0;
+            const isActive = props.activeKeys?.has(k) ?? false;
+            const cls =
+              "kb-chart-key" +
+              (isActive ? " is-active" : "") +
+              (hasStep ? " is-step is-step-" + (props.stepKind ?? "hint") : "");
+            return (
+              <div key={k} className={cls} data-key={k}>
+                {hasStep ? (
+                  <span className="kb-step-badge" data-testid={"kb-step-" + k}>
+                    {steps.join("·")}
+                  </span>
+                ) : null}
+                <div className="kb-chart-letter">{up(k)}</div>
+                <div className="kb-chart-roots">{KEY_REPS[k]}</div>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {props.compact ? null : (
+        <div className="kb-chart-row">
+          {PUNCT.map((p) => (
+            <div key={p.key} className="kb-chart-key">
+              <div className="kb-chart-letter">
+                {p.key} {p.label}
+              </div>
+              <div className="kb-chart-roots">{p.note}</div>
             </div>
           ))}
         </div>
-      ))}
-      <div className="kb-chart-row">
-        {PUNCT.map((p) => (
-          <div key={p.key} className="kb-chart-key">
-            <div className="kb-chart-letter">
-              {p.key} {p.label}
-            </div>
-            <div className="kb-chart-roots">{p.note}</div>
-          </div>
-        ))}
-      </div>
+      )}
       <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
-        字根總表來自行易官網；每鍵只列常用代表字根。逗號、句點、引號鍵主要用來打標點符號，不在字根練習裡出題。
+        {props.compact
+          ? "打字時會同步標亮按鍵；按「提示」或答完題會標出 ①②③ 拆碼順序。"
+          : "字根總表來自行易官網；每鍵只列常用代表字根。逗號、句點、引號鍵主要用來打標點符號，不在字根練習裡出題。"}
       </p>
     </div>
   );
@@ -610,6 +634,12 @@ export default function App(): JSX.Element {
   const [verdict, setVerdict] = useState<Verdict>("idle");
   const [usedSelect, setUsedSelect] = useState<boolean>(false);
   const [shortGrade, setShortGrade] = useState<ShortGradeResult | null>(null);
+  const [articleActive, setArticleActive] = useState<{ code: string; hintOn: boolean; bad: boolean; typed: string }>({
+    code: "",
+    hintOn: false,
+    bad: false,
+    typed: "",
+  });
 
   const saved = useMemo(() => loadStats(), []);
   const [ok, setOk] = useState<number>(saved.ok);
@@ -1135,17 +1165,73 @@ export default function App(): JSX.Element {
 
   const activeKeys = useMemo(() => {
     const s = new Set<string>();
-    for (const ch of typed.toLowerCase()) {
+    const rawTyped = mode === "article" ? articleActive.typed : typed;
+    for (const ch of rawTyped.toLowerCase()) {
       if (ch >= "a" && ch <= "z") s.add(ch);
     }
-    if (verdict === "bad") {
+    if (mode === "article") {
+      if (articleActive.bad) {
+        for (const ch of articleActive.code) s.add(ch);
+      } else if (articleActive.hintOn && articleActive.code[0]) {
+        s.add(articleActive.code[0]);
+      }
+      return s;
+    }
+    if (verdict !== "idle") {
       if (mode === "roots" && rootQ) s.add(rootQ.key);
-      else if (charQ) {
+      else if (mode === "short" && charQ) {
+        const sc = shortCodesOf(charQ)[0] ?? charQ.k[0];
+        for (const ch of sc) s.add(ch);
+      } else if (charQ) {
         for (const ch of charQ.k[0]) s.add(ch);
+      }
+    } else if (hintOn) {
+      if (mode === "roots" && rootQ) s.add(rootQ.key);
+      else if (mode === "short" && charQ) {
+        const sc = shortCodesOf(charQ)[0] ?? charQ.k[0];
+        if (sc.length >= 2 && sc[0]) s.add(sc[0]);
+      } else if (charQ && charQ.k[0]?.[0]) {
+        s.add(charQ.k[0][0]);
       }
     }
     return s;
-  }, [typed, verdict, mode, rootQ, charQ]);
+  }, [typed, verdict, hintOn, mode, rootQ, charQ, articleActive]);
+
+  const kbStepInfo = useMemo(() => {
+    const map = new Map<string, number[]>();
+    let kind: "hint" | "ok" | "bad" = "hint";
+    let seq = "";
+    if (mode === "article") {
+      if (articleActive.bad) {
+        seq = articleActive.code;
+        kind = "bad";
+      } else if (articleActive.hintOn && articleActive.code[0]) {
+        seq = articleActive.code[0];
+        kind = "hint";
+      }
+    } else if (verdict !== "idle") {
+      kind = verdict === "ok" ? "ok" : "bad";
+      if (mode === "roots" && rootQ) seq = rootQ.key;
+      else if (mode === "short" && charQ) seq = shortCodesOf(charQ)[0] ?? charQ.k[0];
+      else if (charQ) seq = charQ.k[0];
+    } else if (hintOn) {
+      kind = "hint";
+      if (mode === "roots" && rootQ) seq = rootQ.key;
+      else if (mode === "short" && charQ) {
+        const sc = shortCodesOf(charQ)[0] ?? charQ.k[0];
+        if (sc.length >= 2) seq = sc[0];
+      } else if (charQ && charQ.k[0]) {
+        seq = charQ.k[0][0];
+      }
+    }
+    for (let i = 0; i < seq.length; i++) {
+      const ch = seq[i].toLowerCase();
+      const prev = map.get(ch);
+      if (prev) prev.push(i + 1);
+      else map.set(ch, [i + 1]);
+    }
+    return { map, kind };
+  }, [mode, verdict, hintOn, rootQ, charQ, articleActive]);
 
   const charSimpHints = useMemo(() => (charQ ? getSimplifiedHints(charQ.c) : []), [charQ]);
 
@@ -1352,6 +1438,12 @@ export default function App(): JSX.Element {
                   字根：{breakdown(charQ.k[0])}
                 </span>
               </p>
+              <KeycapBreakdown
+                code={charQ.k[0]}
+                verdict="ok"
+                reps={KEY_REPS}
+                compact
+              />
               <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} compact />
             </div>
           ) : null}
@@ -1365,6 +1457,15 @@ export default function App(): JSX.Element {
                   {charQ.k[1] ? " 　另一碼：" + breakdown(charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : ""}
                 </span>
               </p>
+              <KeycapBreakdown
+                code={charQ.k[0]}
+                altCode={charQ.k[1] ? (charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : undefined}
+                altLabel="另一碼"
+                typedCode={typed}
+                verdict="bad"
+                reps={KEY_REPS}
+                compact
+              />
               <SimpHintBar
                 hints={charSimpHints}
                 reps={KEY_REPS}
@@ -1421,6 +1522,16 @@ export default function App(): JSX.Element {
                   {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
                 </span>
               </p>
+              <KeycapBreakdown
+                code={sc0}
+                altCode={!shortGrade.ok && fc0 ? fc0 : undefined}
+                altLabel="全碼"
+                typedCode={typed}
+                verdict={verdict === "ok" ? "ok" : "bad"}
+                reps={KEY_REPS}
+                label={verdict === "ok" ? "簡碼" : "簡碼正解"}
+                compact
+              />
               <SimpHintBar
                 hints={charSimpHints}
                 reps={KEY_REPS}
@@ -1692,7 +1803,7 @@ export default function App(): JSX.Element {
 
     const chartSheet = showKb ? (
       <BottomSheet theme={theme} title="鍵盤字根表" onClose={() => setShowKb(false)} testId="root-chart-sheet">
-        <KeyboardChart activeKeys={activeKeys} />
+        <KeyboardChart activeKeys={activeKeys} stepMap={kbStepInfo.map} stepKind={kbStepInfo.kind} />
       </BottomSheet>
     ) : null;
 
@@ -1708,6 +1819,8 @@ export default function App(): JSX.Element {
         </BottomSheet>
       ) : null;
 
+    const mobileModeStrip = <MobileModeStrip mode={mode} onChange={(v) => switchMode(v)} />;
+
     if (mode === "history") {
       return (
         <Suspense fallback={<div className="mobile-shell" style={{ background: theme.bg.base }} />}>
@@ -1719,6 +1832,7 @@ export default function App(): JSX.Element {
             settings={{ autoNext, theme: themeId, colorMode }}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
+            mobileModeStrip={mobileModeStrip}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1739,6 +1853,7 @@ export default function App(): JSX.Element {
             isMobile
             reps={KEY_REPS}
             onOpenSettings={() => setShowSettings(true)}
+            mobileModeStrip={mobileModeStrip}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1765,7 +1880,9 @@ export default function App(): JSX.Element {
             onAttempt={({ correct, ms }) => {
               setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
             }}
+            onActiveChange={setArticleActive}
             onOpenSettings={() => setShowSettings(true)}
+            mobileModeStrip={mobileModeStrip}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1836,6 +1953,7 @@ export default function App(): JSX.Element {
         theme={theme}
         answer={qaAnswer}
         header={header}
+        modeStrip={mobileModeStrip}
         stage={stageInner}
         footer={footer}
         sheets={
@@ -1977,10 +2095,12 @@ export default function App(): JSX.Element {
         {showKb ? (
           <section className="stage-card">
             <h2 style={{ ...theme.font.heading3, margin: "0 0 12px", fontWeight: theme.weight.semibold }}>鍵盤字根表</h2>
-            <KeyboardChart activeKeys={activeKeys} />
+            <KeyboardChart activeKeys={activeKeys} stepMap={kbStepInfo.map} stepKind={kbStepInfo.kind} />
           </section>
         ) : null}
 
+        <div className={"desktop-workspace" + (mode === "lookup" || mode === "history" ? " is-single" : "")}>
+          <div className="desktop-main-col">
         {mode === "roots" ? (
           <section className="stage-card">
             {rootQ ? (
@@ -2026,15 +2146,19 @@ export default function App(): JSX.Element {
                     </p>
                   ) : null}
                   {verdict === "ok" ? (
-                    <p style={{ ...theme.font.body1, color: theme.text.success, margin: 0, fontWeight: theme.weight.semibold }}>
-                      答對了，{rootQ.glyph} 就是 {up(rootQ.key)} 鍵。
-                    </p>
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{ ...theme.font.body1, color: theme.text.success, margin: "0 0 6px", fontWeight: theme.weight.semibold }}>
+                        答對了，{rootQ.glyph} 就是 {up(rootQ.key)} 鍵。
+                      </p>
+                      <KeycapBreakdown code={rootQ.key} verdict="ok" reps={KEY_REPS} />
+                    </div>
                   ) : null}
                   {verdict === "bad" ? (
                     <div style={{ textAlign: "center" }}>
-                      <p style={{ ...theme.font.body1, color: theme.text.danger, margin: 0, fontWeight: theme.weight.semibold }}>
+                      <p style={{ ...theme.font.body1, color: theme.text.danger, margin: "0 0 6px", fontWeight: theme.weight.semibold }}>
                         不對。正確答案是 {up(rootQ.key)} 鍵（{KEY_REPS[rootQ.key]}）。
                       </p>
+                      <KeycapBreakdown code={rootQ.key} typedCode={typed} verdict="bad" reps={KEY_REPS} />
                     </div>
                   ) : null}
                 </div>
@@ -2138,6 +2262,7 @@ export default function App(): JSX.Element {
                     <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
                       字根：{breakdown(charQ.k[0])}
                     </p>
+                    <KeycapBreakdown code={charQ.k[0]} verdict="ok" reps={KEY_REPS} />
                     <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} />
                   </div>
                 ) : null}
@@ -2150,6 +2275,14 @@ export default function App(): JSX.Element {
                       字根：{breakdown(charQ.k[0])}
                       {charQ.k[1] ? " 　另一碼：" + breakdown(charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : ""}
                     </p>
+                    <KeycapBreakdown
+                      code={charQ.k[0]}
+                      altCode={charQ.k[1] ? (charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]) : undefined}
+                      altLabel="另一碼"
+                      typedCode={typed}
+                      verdict="bad"
+                      reps={KEY_REPS}
+                    />
                     <SimpHintBar
                       hints={charSimpHints}
                       reps={KEY_REPS}
@@ -2227,6 +2360,15 @@ export default function App(): JSX.Element {
                         簡碼字根：{breakdown(sc0)}
                         {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
                       </p>
+                      <KeycapBreakdown
+                        code={sc0}
+                        altCode={!shortGrade.ok && fc0 ? fc0 : undefined}
+                        altLabel="全碼"
+                        typedCode={typed}
+                        verdict={verdict === "ok" ? "ok" : "bad"}
+                        reps={KEY_REPS}
+                        label={verdict === "ok" ? "簡碼" : "簡碼正解"}
+                      />
                       <SimpHintBar
                         hints={charSimpHints}
                         reps={KEY_REPS}
@@ -2275,6 +2417,7 @@ export default function App(): JSX.Element {
               onAttempt={({ correct, ms }) => {
                 setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
               }}
+              onActiveChange={setArticleActive}
               onOpenSettings={() => undefined}
             />
           </Suspense>
@@ -2362,57 +2505,82 @@ export default function App(): JSX.Element {
           </section>
         ) : null}
 
+          </div>
         {mode === "lookup" || mode === "history" ? null : (
-        <section className="stage-card">
-          <h2 style={{ ...theme.font.heading3, margin: "0 0 8px", fontWeight: theme.weight.semibold }}>這輪最常錯的</h2>
-          {mode === "roots" ? (
-            missedRootList.length === 0 ? (
-              <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>還沒有錯的字根。</p>
-            ) : (
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {missedRootList.map((x) => (
-                  <li key={x.id} style={{ ...theme.font.body1, marginBottom: 4 }}>
-                    {x.id.split(":")[1]} （{up(x.id.split(":")[0])} 鍵） · 錯 {x.n} 次
-                  </li>
-                ))}
-              </ul>
-            )
-          ) : mode === "short" ? (
-            missedShortList.length === 0 ? (
-              <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
-                還沒有簡碼錯字。可用「複習錯字」專攻常錯的題。
-              </p>
-            ) : (
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {missedShortList.map((x) => {
-                  const item = CHARS.find((c) => c.c === x.id);
-                  const sc = item ? fmtCodes(shortCodesOf(item)) : "";
-                  const fc = item && fullCodesOf(item).length > 0 ? "（全碼 " + fmtCodes(fullCodesOf(item)) + "）" : "";
-                  return (
-                    <li key={x.id} style={{ ...theme.font.body1, marginBottom: 4 }}>
-                      {x.id} 簡碼 {sc}
-                      {fc} · 錯 {x.n} 次
-                    </li>
-                  );
-                })}
-              </ul>
-            )
-          ) : missedCharList.length === 0 ? (
-            <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>還沒有錯字。可用「複習錯字」專攻常錯的題。</p>
-          ) : (
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
-              {missedCharList.map((x) => {
-                const item = CHARS.find((c) => c.c === x.id);
-                return (
-                  <li key={x.id} style={{ ...theme.font.body1, marginBottom: 4 }}>
-                    {x.id} {item ? fmtCodes(item.k) : ""} · 錯 {x.n} 次
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+          <aside className="desktop-side-col" data-testid="desktop-sidebar">
+            <section className="stage-card side-card">
+              <div className="side-card-head">
+                <h2 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>嘸蝦米鍵盤字根圖</h2>
+                <span className="side-card-badge">即時拆碼</span>
+              </div>
+              <KeyboardChart
+                activeKeys={activeKeys}
+                stepMap={kbStepInfo.map}
+                stepKind={kbStepInfo.kind}
+                compact
+              />
+            </section>
+            <section className="stage-card side-card">
+              <h2 style={{ ...theme.font.heading3, margin: "0 0 8px", fontWeight: theme.weight.semibold }}>這輪最常錯的</h2>
+              {mode === "roots" ? (
+                missedRootList.length === 0 ? (
+                  <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>還沒有錯的字根。</p>
+                ) : (
+                  <div className="missed-grid">
+                    {missedRootList.map((x) => {
+                      const [k, g] = x.id.split(":");
+                      return (
+                        <div key={x.id} className="missed-card">
+                          <span className="missed-card-glyph">{g}</span>
+                          <span className="missed-card-code">{up(k)} 鍵</span>
+                          <span className="missed-card-count">錯 {x.n} 次</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : mode === "short" ? (
+                missedShortList.length === 0 ? (
+                  <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
+                    還沒有簡碼錯字。可用「複習錯字」專攻常錯的題。
+                  </p>
+                ) : (
+                  <div className="missed-grid">
+                    {missedShortList.map((x) => {
+                      const item = CHARS.find((c) => c.c === x.id);
+                      const sc = item ? fmtCodes(shortCodesOf(item)) : "";
+                      const fc = item && fullCodesOf(item).length > 0 ? fmtCodes(fullCodesOf(item)) : "";
+                      return (
+                        <div key={x.id} className="missed-card">
+                          <span className="missed-card-glyph">{x.id}</span>
+                          <span className="missed-card-code">簡碼 {sc}</span>
+                          {fc ? <span className="missed-card-full">全碼 {fc}</span> : null}
+                          <span className="missed-card-count">錯 {x.n} 次</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : missedCharList.length === 0 ? (
+                <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>還沒有錯字。可用「複習錯字」專攻常錯的題。</p>
+              ) : (
+                <div className="missed-grid">
+                  {missedCharList.map((x) => {
+                    const item = CHARS.find((c) => c.c === x.id);
+                    return (
+                      <div key={x.id} className="missed-card">
+                        <span className="missed-card-glyph">{x.id}</span>
+                        <span className="missed-card-code">{item ? fmtCodes(item.k.slice(0, 2)) : ""}</span>
+                        <span className="missed-card-count">錯 {x.n} 次</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </aside>
         )}
+        </div>
 
         <footer className="footer-bar">
           <details className="sources-details">

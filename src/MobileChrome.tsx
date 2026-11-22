@@ -1,10 +1,48 @@
 import { useRef, useState, type CSSProperties, type JSX, type ReactNode, type TouchEvent } from "react";
 import type { GrokTheme } from "./theme";
+import { ModeIcon, type NavMode } from "./ThemePicker";
+
+export const MOBILE_MODES: { value: NavMode; label: string; shortLabel: string }[] = [
+  { value: "roots", label: "字根練習", shortLabel: "字根" },
+  { value: "chars", label: "常用字", shortLabel: "常用字" },
+  { value: "short", label: "簡碼練習", shortLabel: "簡碼" },
+  { value: "timed", label: "限時挑戰", shortLabel: "限時" },
+  { value: "article", label: "文章練習", shortLabel: "文章" },
+  { value: "lookup", label: "查碼", shortLabel: "查碼" },
+  { value: "history", label: "紀錄", shortLabel: "紀錄" },
+];
+
+export function MobileModeStrip(props: {
+  mode: NavMode;
+  onChange: (mode: NavMode) => void;
+}): JSX.Element {
+  return (
+    <nav className="mobile-mode-strip" aria-label="快速切換模式" data-testid="mobile-mode-strip">
+      {MOBILE_MODES.map((m) => {
+        const on = props.mode === m.value;
+        return (
+          <button
+            key={m.value}
+            type="button"
+            data-testid={"mobile-mode-chip-" + m.value}
+            aria-current={on ? "page" : undefined}
+            className={"mobile-mode-chip" + (on ? " is-on" : "")}
+            onClick={() => props.onChange(m.value)}
+          >
+            <ModeIcon mode={m.value} />
+            <span>{m.shortLabel}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 export function MobileShell(props: {
   theme: GrokTheme;
   answer?: string;
   header: ReactNode;
+  modeStrip?: ReactNode;
   stage: ReactNode;
   footer: ReactNode;
   sheets?: ReactNode;
@@ -17,6 +55,7 @@ export function MobileShell(props: {
   return (
     <div className="mobile-shell" style={style} data-testid="mobile-root" data-answer={props.answer ?? ""}>
       {props.header}
+      {props.modeStrip}
       <main className="mobile-stage">{props.stage}</main>
       <footer className="mobile-footer">{props.footer}</footer>
       {props.sheets}

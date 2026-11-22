@@ -51,6 +51,7 @@ export default function HistoryMode(props: {
   settings: BackupSettings;
   onOpenSettings: () => void;
   onImport: (data: BackupFile, mode: ImportMode) => void;
+  mobileModeStrip?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile, history } = props;
@@ -372,7 +373,16 @@ export default function HistoryMode(props: {
         </button>
       </div>
     );
-    return <MobileShell theme={theme} header={header} stage={body} footer={footer} sheets={props.mobileSheets} />;
+    return (
+      <MobileShell
+        theme={theme}
+        header={header}
+        modeStrip={props.mobileModeStrip}
+        stage={body}
+        footer={footer}
+        sheets={props.mobileSheets}
+      />
+    );
   }
 
   return (

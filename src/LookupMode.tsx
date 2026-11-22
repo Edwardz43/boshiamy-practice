@@ -58,6 +58,7 @@ export default function LookupMode(props: {
   isMobile: boolean;
   reps: Record<string, string>;
   onOpenSettings: () => void;
+  mobileModeStrip?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
@@ -348,7 +349,16 @@ export default function LookupMode(props: {
         </button>
       </div>
     );
-    return <MobileShell theme={theme} header={header} stage={stage} footer={footer} sheets={props.mobileSheets} />;
+    return (
+      <MobileShell
+        theme={theme}
+        header={header}
+        modeStrip={props.mobileModeStrip}
+        stage={stage}
+        footer={footer}
+        sheets={props.mobileSheets}
+      />
+    );
   }
 
   return (
