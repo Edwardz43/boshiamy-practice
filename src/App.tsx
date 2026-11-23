@@ -41,6 +41,7 @@ import {
 import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
 import { KeycapBreakdown } from "./KeycapBreakdown";
+import { createBag, drawFromBag, shuffle, type DrawBag } from "./drawLogic";
 
 // 文章練習 is split into its own chunk; its code table (liu-table.json) loads only when the mode opens.
 const ArticleMode = lazy(() => import("./ArticleMode"));
@@ -354,68 +355,13 @@ function breakdown(code: string): string {
 }
 
 // Frequency-weighted draw for the character modes.
-// weight = sqrt(教育部字頻次): common chars come up more often, rare ones still appear.
-// Never repeats any of the last RECENT_AVOID questions while the pool has enough other chars.
-const RECENT_AVOID = 5;
+// weight = sqrt(教育部字頻次): common chars tend to come earlier in each round, rare ones still appear once per round.
 function charWeight(x: CharItem): number {
   return Math.sqrt(x.f);
 }
 
-function drawWeighted(list: CharItem[], recent: string[]): CharItem | null {
-  if (list.length === 0) return null;
-  if (list.length === 1) return list[0];
-  const avoidN = Math.min(RECENT_AVOID, list.length - 1);
-  const avoid = new Set(recent.slice(-avoidN));
-  const cand = list.filter((x) => !avoid.has(x.c));
-  const pick = cand.length ? cand : list;
-  let total = 0;
-  for (const x of pick) total += charWeight(x);
-  let r = Math.random() * total;
-  for (const x of pick) {
-    r -= charWeight(x);
-    if (r < 0) return x;
-  }
-  return pick[pick.length - 1];
-}
-
-function drawFromBag<T>(
-  bag: { ids: string[] },
-  list: T[],
-  prev: T | null,
-  idOf: (x: T) => string,
-): T | null {
-  if (list.length === 0) return null;
-  if (list.length === 1) return list[0];
-  const byId = new Map(list.map((x) => [idOf(x), x] as const));
-  const prevId = prev ? idOf(prev) : null;
-  // Drop ids no longer in the pool (filters or review list changed).
-  bag.ids = bag.ids.filter((id) => byId.has(id));
-  if (bag.ids.length === 0) {
-    const fresh = shuffle(list.map(idOf));
-    // Avoid repeating the last question right at the start of a new round.
-    if (fresh.length > 1 && fresh[fresh.length - 1] === prevId) {
-      const j = Math.floor(Math.random() * (fresh.length - 1));
-      [fresh[j], fresh[fresh.length - 1]] = [fresh[fresh.length - 1], fresh[j]];
-    }
-    bag.ids = fresh;
-  }
-  const id = bag.ids.pop() as string;
-  return byId.get(id) ?? null;
-}
-
 function rootId(r: RootItem): string {
   return r.key + ":" + r.glyph;
-}
-
-function shuffle<T>(list: T[]): T[] {
-  const a = list.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const t = a[i];
-    a[i] = a[j];
-    a[j] = t;
-  }
-  return a;
 }
 
 function pct(ok: number, total: number): string {
@@ -620,11 +566,9 @@ export default function App(): JSX.Element {
   );
   const [pickedId, setPickedId] = useState<string | null>(null);
   const autoNextRef = useRef<number | null>(null);
-  const charBag = useRef<{ ids: string[] }>({ ids: [] });
-  const shortBag = useRef<{ ids: string[] }>({ ids: [] });
-  const rootBag = useRef<{ ids: string[] }>({ ids: [] });
-  const recentChars = useRef<string[]>([]);
-  const recentShort = useRef<string[]>([]);
+  const charBag = useRef<DrawBag>(createBag());
+  const shortBag = useRef<DrawBag>(createBag());
+  const rootBag = useRef<DrawBag>(createBag());
 
   const [rootQ, setRootQ] = useState<RootItem | null>(null);
   const [choices, setChoices] = useState<RootItem[]>([]);
@@ -711,10 +655,10 @@ export default function App(): JSX.Element {
     }, 600);
   }
 
-  function nextRoot(prev: RootItem | null): void {
+  function nextRoot(): void {
     clearAutoNext();
     setPickedId(null);
-    const item = drawFromBag(rootBag.current, rootPool, prev, rootId);
+    const item = drawFromBag(rootBag.current, rootPool, rootId);
     setRootQ(item);
     setTyped("");
     setHintOn(false);
@@ -728,13 +672,15 @@ export default function App(): JSX.Element {
     }
   }
 
-  function nextChar(prev: CharItem | null): void {
+  function nextChar(): void {
     clearAutoNext();
-    // Review mode stays a plain shuffle-bag; normal practice / timed use frequency weighting.
-    const item = review
-      ? drawFromBag(charBag.current, pool, prev, (x) => x.c)
-      : drawWeighted(pool, recentChars.current);
-    if (item) recentChars.current = [...recentChars.current, item.c].slice(-RECENT_AVOID);
+    // Review mode stays a plain shuffle-bag; normal practice / timed use weighted shuffle-bag.
+    const item = drawFromBag(
+      charBag.current,
+      pool,
+      (x) => x.c,
+      review ? undefined : { weightOf: charWeight },
+    );
     setCharQ(item);
     setTyped("");
     setHintOn(false);
@@ -743,14 +689,15 @@ export default function App(): JSX.Element {
     qStartedAt.current = Date.now();
   }
 
-  function nextShort(prev: CharItem | null): void {
+  function nextShort(): void {
     clearAutoNext();
-    // Drill every 1-key short code once per round; higher tiers and normal practice use frequency weighting.
-    const item =
-      review || shortTier === "one"
-        ? drawFromBag(shortBag.current, shortPool, prev, (x) => x.c)
-        : drawWeighted(shortPool, recentShort.current);
-    if (item) recentShort.current = [...recentShort.current, item.c].slice(-RECENT_AVOID);
+    // Drill every 1-key short code once per round; higher tiers and normal practice use weighted shuffle-bag.
+    const item = drawFromBag(
+      shortBag.current,
+      shortPool,
+      (x) => x.c,
+      review || shortTier === "one" ? undefined : { weightOf: charWeight },
+    );
     setCharQ(item);
     setTyped("");
     setHintOn(false);
@@ -764,11 +711,9 @@ export default function App(): JSX.Element {
     charBag.current.ids = [];
     shortBag.current.ids = [];
     rootBag.current.ids = [];
-    recentChars.current = [];
-    recentShort.current = [];
-    if (mode === "roots") nextRoot(null);
-    else if (mode === "chars") nextChar(null);
-    else if (mode === "short") nextShort(null);
+    if (mode === "roots") nextRoot();
+    else if (mode === "chars") nextChar();
+    else if (mode === "short") nextShort();
     else if (phase !== "run") {
       setCharQ(null);
       setVerdict("idle");
@@ -896,7 +841,7 @@ export default function App(): JSX.Element {
     grade(good);
     noteAttempt("roots", good);
     if (!good) markMissRoot(rootQ);
-    if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot(rootQ));
+    if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot());
   }
 
   function submitChar(raw: string, timed: boolean): void {
@@ -919,10 +864,10 @@ export default function App(): JSX.Element {
     if (timed) {
       window.setTimeout(() => {
         setVerdict("idle");
-        nextChar(charQ);
+        nextChar();
       }, good ? 450 : 900);
     } else if (good && autoNext && isMobile) {
-      scheduleAutoNext(() => nextChar(charQ));
+      scheduleAutoNext(() => nextChar());
     }
   }
 
@@ -936,7 +881,7 @@ export default function App(): JSX.Element {
     setUsedSelect(res.kind === "select");
     if (!res.ok) markMissChar(charQ.c);
     if (res.ok && autoNext && isMobile) {
-      scheduleAutoNext(() => nextShort(charQ));
+      scheduleAutoNext(() => nextShort());
     }
   }
 
@@ -948,7 +893,7 @@ export default function App(): JSX.Element {
     setTTried(0);
     setVerdict("idle");
     setTyped("");
-    nextChar(null);
+    nextChar();
     timerRef.current = window.setInterval(() => {
       setLeft((s) => {
         if (s <= 1) {
@@ -977,7 +922,7 @@ export default function App(): JSX.Element {
     grade(good);
     noteAttempt("roots", good);
     if (!good) markMissRoot(rootQ);
-    if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot(rootQ));
+    if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot());
   }
 
   function typeLetter(letter: string): void {
@@ -998,9 +943,9 @@ export default function App(): JSX.Element {
       return;
     }
     if (verdict !== "idle") {
-      if (mode === "roots") nextRoot(rootQ);
-      else if (mode === "short") nextShort(charQ);
-      else nextChar(charQ);
+      if (mode === "roots") nextRoot();
+      else if (mode === "short") nextShort();
+      else nextChar();
     } else if (mode === "roots" && rootDir === "forward") submitRoot(typed);
     else if (mode === "short") submitShort(typed);
     else if (mode === "chars") submitChar(typed, false);
@@ -1008,12 +953,12 @@ export default function App(): JSX.Element {
 
   function onSkipLike(): void {
     if (mode === "timed") {
-      if (phase === "run") nextChar(charQ);
+      if (phase === "run") nextChar();
       return;
     }
-    if (mode === "roots") nextRoot(rootQ);
-    else if (mode === "short") nextShort(charQ);
-    else nextChar(charQ);
+    if (mode === "roots") nextRoot();
+    else if (mode === "short") nextShort();
+    else nextChar();
   }
 
   useEffect(() => {
@@ -1123,9 +1068,9 @@ export default function App(): JSX.Element {
       if (go) {
         ev.preventDefault();
         if (verdict !== "idle") {
-          if (mode === "roots") nextRoot(rootQ);
-          else if (mode === "short") nextShort(charQ);
-          else nextChar(charQ);
+          if (mode === "roots") nextRoot();
+          else if (mode === "short") nextShort();
+          else nextChar();
         } else if (mode === "roots" && rootDir === "forward") submitRoot(typed);
         else if (mode === "short") submitShort(typed);
         else if (mode === "chars") submitChar(typed, false);
@@ -1138,9 +1083,9 @@ export default function App(): JSX.Element {
       }
       if (k === "Escape") {
         ev.preventDefault();
-        if (mode === "roots") nextRoot(rootQ);
-        else if (mode === "short") nextShort(charQ);
-        else nextChar(charQ);
+        if (mode === "roots") nextRoot();
+        else if (mode === "short") nextShort();
+        else nextChar();
         return;
       }
       if (mode === "roots" && rootDir === "reverse" && /^[1-4]$/.test(k)) {
@@ -1922,7 +1867,7 @@ export default function App(): JSX.Element {
             type="button"
             className="os-action is-primary"
             disabled={verdict === "idle"}
-            onClick={() => nextRoot(rootQ)}
+            onClick={() => nextRoot()}
           >
             下一題
           </button>
@@ -2138,7 +2083,7 @@ export default function App(): JSX.Element {
                       onClick={() => setHintOn(true)}
                       disabled={verdict !== "idle"}
                     />
-                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot(rootQ)} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot()} />
                   </div>
                   {hintOn || verdict !== "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0, textAlign: "center" }}>
@@ -2193,7 +2138,7 @@ export default function App(): JSX.Element {
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                     <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot(rootQ)} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextRoot()} />
                   </div>
                   {hintOn && verdict === "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0, textAlign: "center" }}>
@@ -2249,7 +2194,7 @@ export default function App(): JSX.Element {
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                   <Action label="送出" kbd="Enter" primary onClick={() => submitChar(typed, false)} disabled={verdict !== "idle"} />
                   <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                  <Action label="下一題" kbd="Esc" onClick={() => nextChar(charQ)} />
+                  <Action label="下一題" kbd="Esc" onClick={() => nextChar()} />
                 </div>
                 {hintOn && verdict === "idle" ? (
                   <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }}>第一碼是 {hintOf(charQ)}</p>
@@ -2337,7 +2282,7 @@ export default function App(): JSX.Element {
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                     <Action label="送出" kbd="Enter" primary onClick={() => submitShort(typed)} disabled={verdict !== "idle"} />
                     <Action label="提示" kbd="/" onClick={() => setHintOn(true)} disabled={verdict !== "idle"} />
-                    <Action label="下一題" kbd="Esc" onClick={() => nextShort(charQ)} />
+                    <Action label="下一題" kbd="Esc" onClick={() => nextShort()} />
                   </div>
                   {hintOn && verdict === "idle" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.accent, margin: 0 }} data-testid="short-hint">
