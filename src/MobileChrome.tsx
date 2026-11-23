@@ -1,15 +1,15 @@
-import { useRef, useState, type CSSProperties, type JSX, type ReactNode, type TouchEvent } from "react";
+import { Fragment, useRef, useState, type CSSProperties, type JSX, type ReactNode, type TouchEvent } from "react";
 import type { GrokTheme } from "./theme";
 import { ModeIcon, type NavMode } from "./ThemePicker";
 
-export const MOBILE_MODES: { value: NavMode; label: string; shortLabel: string }[] = [
-  { value: "roots", label: "字根練習", shortLabel: "字根" },
-  { value: "chars", label: "常用字", shortLabel: "常用字" },
-  { value: "short", label: "簡碼練習", shortLabel: "簡碼" },
-  { value: "timed", label: "限時挑戰", shortLabel: "限時" },
-  { value: "article", label: "文章練習", shortLabel: "文章" },
-  { value: "lookup", label: "查碼", shortLabel: "查碼" },
-  { value: "history", label: "紀錄", shortLabel: "紀錄" },
+export const MOBILE_MODES: { value: NavMode; label: string; shortLabel: string; group: "practice" | "tools" }[] = [
+  { value: "roots", label: "字根練習", shortLabel: "字根", group: "practice" },
+  { value: "short", label: "簡碼練習", shortLabel: "簡碼", group: "practice" },
+  { value: "chars", label: "常用字", shortLabel: "常用字", group: "practice" },
+  { value: "article", label: "文章練習", shortLabel: "文章", group: "practice" },
+  { value: "timed", label: "限時挑戰", shortLabel: "限時", group: "practice" },
+  { value: "lookup", label: "查碼", shortLabel: "查碼", group: "tools" },
+  { value: "history", label: "紀錄", shortLabel: "紀錄", group: "tools" },
 ];
 
 export function MobileModeStrip(props: {
@@ -18,23 +18,68 @@ export function MobileModeStrip(props: {
 }): JSX.Element {
   return (
     <nav className="mobile-mode-strip" aria-label="快速切換模式" data-testid="mobile-mode-strip">
-      {MOBILE_MODES.map((m) => {
+      {MOBILE_MODES.map((m, idx) => {
         const on = props.mode === m.value;
+        const prev = idx > 0 ? MOBILE_MODES[idx - 1] : null;
+        const showDivider = prev != null && prev.group !== m.group;
         return (
-          <button
-            key={m.value}
-            type="button"
-            data-testid={"mobile-mode-chip-" + m.value}
-            aria-current={on ? "page" : undefined}
-            className={"mobile-mode-chip" + (on ? " is-on" : "")}
-            onClick={() => props.onChange(m.value)}
-          >
-            <ModeIcon mode={m.value} />
-            <span>{m.shortLabel}</span>
-          </button>
+          <Fragment key={m.value}>
+            {showDivider ? <span className="mobile-mode-divider" aria-hidden="true" /> : null}
+            <button
+              type="button"
+              data-testid={"mobile-mode-chip-" + m.value}
+              aria-current={on ? "page" : undefined}
+              className={"mobile-mode-chip" + (on ? " is-on" : "")}
+              onClick={() => props.onChange(m.value)}
+            >
+              <ModeIcon mode={m.value} />
+              <span>{m.shortLabel}</span>
+            </button>
+          </Fragment>
         );
       })}
     </nav>
+  );
+}
+
+export function MobileTodayBar(props: {
+  tried: number;
+  goal: number;
+  pct: number;
+  done: boolean;
+  streakDays: number;
+  weakCount: number;
+  reviewOn: boolean;
+  onWeakReview: () => void;
+}): JSX.Element {
+  return (
+    <div className="mobile-today-bar" data-testid="mobile-today-bar">
+      <div className="mobile-today-progress">
+        <span className="mobile-today-text">
+          今日 {props.tried}/{props.goal}
+          {props.done ? " ✓" : ""}
+        </span>
+        <span className="mobile-today-track" aria-hidden="true">
+          <span
+            className={"mobile-today-fill" + (props.done ? " is-done" : "")}
+            style={{ width: props.pct + "%" }}
+          />
+        </span>
+        <span className="mobile-today-streak">
+          {props.streakDays > 0 ? "🔥 " + props.streakDays + "天" : "首日"}
+        </span>
+      </div>
+      {props.weakCount > 0 && !props.reviewOn ? (
+        <button
+          type="button"
+          className="mobile-today-cta"
+          data-testid="mobile-weak-cta"
+          onClick={props.onWeakReview}
+        >
+          複習弱點 ({props.weakCount})
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -43,6 +88,7 @@ export function MobileShell(props: {
   answer?: string;
   header: ReactNode;
   modeStrip?: ReactNode;
+  todayBar?: ReactNode;
   stage: ReactNode;
   footer: ReactNode;
   sheets?: ReactNode;
@@ -56,6 +102,7 @@ export function MobileShell(props: {
     <div className="mobile-shell" style={style} data-testid="mobile-root" data-answer={props.answer ?? ""}>
       {props.header}
       {props.modeStrip}
+      {props.todayBar}
       <main className="mobile-stage">{props.stage}</main>
       <footer className="mobile-footer">{props.footer}</footer>
       {props.sheets}

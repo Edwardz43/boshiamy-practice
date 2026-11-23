@@ -268,4 +268,34 @@ assert.equal(parsed1.data.exportedAt, backup.exportedAt);
   assert.equal(Object.prototype.hasOwnProperty.call(invalidThemeParsed.data.settings, "colorMode"), false);
 }
 
+// practiceStreakDays, todaySummary, and dailyGoal settings sanitization
+{
+  let h3 = H.emptyHistory();
+  h3 = H.recordAttempt(h3, "roots", { tried: 10, ok: 9, ms: 10000 }, "2026-11-21");
+  h3 = H.recordAttempt(h3, "chars", { tried: 15, ok: 12, ms: 15000 }, "2026-11-22");
+  // Today (2026-11-23) not practiced yet -> keeps yesterday's 2-day streak
+  assert.equal(H.practiceStreakDays(h3, "2026-11-23"), 2);
+  const s0 = H.todaySummary(h3, "2026-11-23", 50);
+  assert.deepEqual(s0, { tried: 0, ok: 0, ms: 0, goal: 50, pct: 0, done: false });
+
+  // After practicing today -> 3-day streak
+  h3 = H.recordAttempt(h3, "short", { tried: 25, ok: 20, ms: 20000 }, "2026-11-23");
+  assert.equal(H.practiceStreakDays(h3, "2026-11-23"), 3);
+  const s1 = H.todaySummary(h3, "2026-11-23", 50);
+  assert.deepEqual(s1, { tried: 25, ok: 20, ms: 20000, goal: 50, pct: 50, done: false });
+
+  // Reaching & exceeding goal caps pct at 100 and sets done=true
+  h3 = H.recordAttempt(h3, "article", { tried: 40, ok: 38, ms: 40000 }, "2026-11-23");
+  const s2 = H.todaySummary(h3, "2026-11-23", 50);
+  assert.deepEqual(s2, { tried: 65, ok: 58, ms: 60000, goal: 50, pct: 100, done: true });
+
+  // Gap breaks streak
+  assert.equal(H.practiceStreakDays(h3, "2026-11-25"), 0);
+
+  // sanitizeSettings accepts valid dailyGoal and rejects out-of-range
+  assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 100 }), { autoNext: false, dailyGoal: 100 });
+  assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 3 }), { autoNext: false });
+  assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 9999 }), { autoNext: false });
+}
+
 console.log("ALL OK");

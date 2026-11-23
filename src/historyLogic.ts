@@ -3,6 +3,9 @@
 export const STATS_KEY = "boshiamy-practice-stats-v1";
 export const HISTORY_KEY = "boshiamy-practice-history-v1";
 export const AUTO_NEXT_KEY = "boshiamy-auto-next-v2";
+export const DAILY_GOAL_KEY = "boshiamy-daily-goal-v1";
+export const DAILY_GOAL_OPTIONS = [30, 50, 100, 200] as const;
+export const DEFAULT_DAILY_GOAL = 50;
 export const BACKUP_VERSION = 1;
 export const MAX_HISTORY_DAYS = 400;
 export const MAX_ITEM_MS = 5 * 60 * 1000;
@@ -53,16 +56,26 @@ export type BackupSettings = {
   autoNext: boolean;
   theme?: string;
   colorMode?: string;
+  dailyGoal?: number;
 };
 
 const VALID_THEMES = new Set(["ink", "studio", "playful", "minimal"]);
 const VALID_COLOR_MODES = new Set(["system", "light", "dark"]);
+
+export function sanitizeDailyGoal(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  const n = Math.floor(raw);
+  if (n < 10 || n > 1000) return undefined;
+  return n;
+}
 
 export function sanitizeSettings(raw: unknown): BackupSettings {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const out: BackupSettings = { autoNext: !!r.autoNext };
   if (typeof r.theme === "string" && VALID_THEMES.has(r.theme)) out.theme = r.theme;
   if (typeof r.colorMode === "string" && VALID_COLOR_MODES.has(r.colorMode)) out.colorMode = r.colorMode;
+  const g = sanitizeDailyGoal(r.dailyGoal);
+  if (g != null) out.dailyGoal = g;
   return out;
 }
 
@@ -498,4 +511,43 @@ export async function shareBackupFile(filename: string, text: string): Promise<b
 export function clipMs(ms: number): number {
   if (!Number.isFinite(ms) || ms < 0) return 0;
   return Math.min(MAX_ITEM_MS, Math.round(ms));
+}
+
+export function practiceStreakDays(history: HistoryStore, today = localDate()): number {
+  if (!isDateKey(today)) return 0;
+  const todayStats = dayTotals(history.days[today], "all");
+  let cur = todayStats.tried > 0 ? today : addDays(today, -1);
+  let days = 0;
+  for (let i = 0; i < MAX_HISTORY_DAYS; i++) {
+    if (dayTotals(history.days[cur], "all").tried <= 0) break;
+    days += 1;
+    cur = addDays(cur, -1);
+  }
+  return days;
+}
+
+export type TodaySummary = {
+  tried: number;
+  ok: number;
+  ms: number;
+  goal: number;
+  pct: number;
+  done: boolean;
+};
+
+export function todaySummary(
+  history: HistoryStore,
+  today = localDate(),
+  goal = DEFAULT_DAILY_GOAL,
+): TodaySummary {
+  const safeGoal = Math.max(1, Math.floor(Number.isFinite(goal) ? goal : DEFAULT_DAILY_GOAL));
+  const stats = isDateKey(today) ? dayTotals(history.days[today], "all") : emptyMode();
+  return {
+    tried: stats.tried,
+    ok: stats.ok,
+    ms: stats.ms,
+    goal: safeGoal,
+    pct: Math.min(100, Math.round((stats.tried / safeGoal) * 100)),
+    done: stats.tried >= safeGoal,
+  };
 }

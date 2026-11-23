@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   Suspense,
   useEffect,
@@ -10,21 +11,28 @@ import {
 import { isColorMode, isThemeId, useGrokTheme, useThemeControl } from "./theme";
 import { useIsMobile } from "./useIsMobile";
 import { OnScreenKeyboard } from "./OnScreenKeyboard";
-import { BottomSheet, IconGearButton, MobileModeStrip, MobileShell, ToggleRow } from "./MobileChrome";
+import { BottomSheet, IconGearButton, MobileModeStrip, MobileShell, MobileTodayBar, ToggleRow } from "./MobileChrome";
 import { BrandMark, DesktopThemeBar, MobileThemeSection, ModeIcon, type NavMode } from "./ThemePicker";
 import {
   type BackupFile,
   type DrillMode,
   type HistoryStore,
   type ImportMode,
+  DAILY_GOAL_KEY,
+  DAILY_GOAL_OPTIONS,
+  DEFAULT_DAILY_GOAL,
   HISTORY_KEY,
   applyBackup,
   clipMs,
   emptyHistory,
   loadHistoryFromStorage,
+  localDate,
+  practiceStreakDays,
   recordAttempt,
+  sanitizeDailyGoal,
   sanitizeStats,
   saveHistoryToStorage,
+  todaySummary,
 } from "./historyLogic";
 import {
   SHORT_TIERS,
@@ -62,6 +70,16 @@ function loadAutoNext(fallback: boolean): boolean {
     /* ignore quota / private mode */
   }
   return fallback;
+}
+
+function loadDailyGoal(): number {
+  try {
+    const raw = localStorage.getItem(DAILY_GOAL_KEY);
+    if (!raw) return DEFAULT_DAILY_GOAL;
+    return sanitizeDailyGoal(Number(raw)) ?? DEFAULT_DAILY_GOAL;
+  } catch {
+    return DEFAULT_DAILY_GOAL;
+  }
 }
 
 
@@ -380,25 +398,29 @@ function topMissed(map: Record<string, number>, limit: number): { id: string; n:
 function SegmentedControl(props: {
   value: NavMode;
   onChange: (v: NavMode) => void;
-  options: { value: NavMode; label: string; kbd: string }[];
+  options: { value: NavMode; label: string; kbd: string; group: "practice" | "tools" }[];
 }): JSX.Element {
   return (
     <div role="tablist" className="mode-tabs">
-      {props.options.map((opt) => {
+      {props.options.map((opt, idx) => {
         const on = opt.value === props.value;
+        const prev = idx > 0 ? props.options[idx - 1] : null;
+        const showDivider = prev != null && prev.group !== opt.group;
         return (
-          <button
-            key={opt.value}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            onClick={() => props.onChange(opt.value)}
-            className={"mode-tab" + (on ? " is-on" : "")}
-          >
-            <ModeIcon mode={opt.value} />
-            <span>{opt.label}</span>
-            <kbd className="kbd kbd-tab">{opt.kbd}</kbd>
-          </button>
+          <Fragment key={opt.value}>
+            {showDivider ? <span className="mode-tabs-divider" role="separator" aria-orientation="vertical" /> : null}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={on}
+              title={opt.label + "（" + opt.kbd + "）"}
+              onClick={() => props.onChange(opt.value)}
+              className={"mode-tab" + (on ? " is-on" : "")}
+            >
+              <ModeIcon mode={opt.value} />
+              <span>{opt.label}</span>
+            </button>
+          </Fragment>
         );
       })}
     </div>
@@ -408,22 +430,105 @@ function SegmentedControl(props: {
 function Pill(props: {
   label: string;
   kbd?: string;
+  title?: string;
   on: boolean;
   onClick: () => void;
   disabled?: boolean;
   testId?: string;
 }): JSX.Element {
+  const hintTitle = props.title ?? (props.kbd ? props.label + "（" + props.kbd + "）" : undefined);
   return (
     <button
       type="button"
       data-testid={props.testId}
+      title={hintTitle}
       onClick={props.onClick}
       disabled={props.disabled}
       className={"ui-pill" + (props.on ? " is-on" : "")}
     >
       <span>{props.label}</span>
-      {props.kbd ? <kbd className="kbd kbd-tab">{props.kbd}</kbd> : null}
     </button>
+  );
+}
+
+function ShortcutsDialog(props: { onClose: () => void }): JSX.Element {
+  const theme = useGrokTheme();
+  const groups: { title: string; items: { keys: string[]; label: string }[] }[] = [
+    {
+      title: "練習操作",
+      items: [
+        { keys: ["Enter", "Space"], label: "送出與下一題" },
+        { keys: ["/"], label: "提示字根／首碼" },
+        { keys: ["Esc"], label: "跳過此題／關閉視窗" },
+        { keys: ["1–4"], label: "看按鍵認字根選答" },
+        { keys: ["⌥N"], label: "文章練習換一篇" },
+      ],
+    },
+    {
+      title: "切換模式",
+      items: [
+        { keys: ["⌥1"], label: "字根練習" },
+        { keys: ["⌥7"], label: "簡碼練習" },
+        { keys: ["⌥2"], label: "常用字" },
+        { keys: ["⌥4"], label: "文章練習" },
+        { keys: ["⌥3"], label: "限時挑戰" },
+        { keys: ["⌥5"], label: "查碼" },
+        { keys: ["⌥6"], label: "紀錄" },
+      ],
+    },
+    {
+      title: "工具與外觀",
+      items: [
+        { keys: ["⌥Q", "⌥W", "⌥E", "⌥T"], label: "切換題庫範圍／方向" },
+        { keys: ["⌥R"], label: "切換複習錯字" },
+        { keys: ["⌥K"], label: "開啟／收起字根表" },
+        { keys: ["⌥J"], label: "開啟／收起簡碼表" },
+        { keys: ["⌥P"], label: "切換外觀主題" },
+        { keys: ["?"], label: "開啟／關閉快捷鍵總表" },
+      ],
+    },
+  ];
+  return (
+    <div
+      className="shortcuts-overlay"
+      data-testid="shortcuts-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-label="快捷鍵總表"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) props.onClose();
+      }}
+    >
+      <div className="shortcuts-dialog">
+        <div className="shortcuts-dialog-head">
+          <h2 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>快捷鍵總表</h2>
+          <button type="button" className="ui-pill" onClick={props.onClose} aria-label="關閉快捷鍵總表">
+            關閉 <kbd className="kbd">Esc</kbd>
+          </button>
+        </div>
+        <div className="shortcuts-grid">
+          {groups.map((g) => (
+            <div key={g.title} className="shortcuts-group">
+              <div className="shortcuts-group-title">{g.title}</div>
+              <ul className="shortcuts-list">
+                {g.items.map((it) => (
+                  <li key={it.label} className="shortcuts-item">
+                    <span className="shortcuts-item-label">{it.label}</span>
+                    <span className="shortcuts-item-keys">
+                      {it.keys.map((k) => (
+                        <kbd key={k} className="kbd">
+                          {k}
+                        </kbd>
+                      ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -564,6 +669,8 @@ export default function App(): JSX.Element {
   const [autoNext, setAutoNext] = useState<boolean>(() =>
     loadAutoNext(false),
   );
+  const [dailyGoal, setDailyGoal] = useState<number>(() => loadDailyGoal());
+  const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const charBag = useRef<DrawBag>(createBag());
@@ -725,12 +832,12 @@ export default function App(): JSX.Element {
   }, [mode, rootDir, diff, shortTier, review]);
 
   useEffect(() => {
-    if (isMobile || themeOpen) return;
+    if (isMobile || themeOpen || shortcutsOpen) return;
     if (mode === "article" || mode === "lookup" || mode === "history") return;
     if (mode === "timed" && phase !== "run") return;
     const t = window.setTimeout(() => focusInput(), 40);
     return () => window.clearTimeout(t);
-  }, [mode, rootQ, charQ, phase, rootDir, shortTier, verdict, isMobile, themeOpen]);
+  }, [mode, rootQ, charQ, phase, rootDir, shortTier, verdict, isMobile, themeOpen, shortcutsOpen]);
 
   useEffect(() => {
     return () => {
@@ -742,6 +849,14 @@ export default function App(): JSX.Element {
   useEffect(() => {
     localStorage.setItem(AUTO_NEXT_KEY, autoNext ? "1" : "0");
   }, [autoNext]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DAILY_GOAL_KEY, String(dailyGoal));
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [dailyGoal]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -794,7 +909,7 @@ export default function App(): JSX.Element {
       {
         stats: { ok, tried, streak, missChars, missRoots },
         history,
-        settings: { autoNext, theme: themeId, colorMode },
+        settings: { autoNext, theme: themeId, colorMode, dailyGoal },
       },
       data,
       how,
@@ -809,6 +924,42 @@ export default function App(): JSX.Element {
       setAutoNext(next.settings.autoNext);
       if (isThemeId(next.settings.theme)) setThemeId(next.settings.theme);
       if (isColorMode(next.settings.colorMode)) setColorMode(next.settings.colorMode);
+      const g = sanitizeDailyGoal(next.settings.dailyGoal);
+      if (g != null) setDailyGoal(g);
+    }
+  }
+
+  function cycleDailyGoal(): void {
+    const idx = DAILY_GOAL_OPTIONS.indexOf(dailyGoal as (typeof DAILY_GOAL_OPTIONS)[number]);
+    const next = DAILY_GOAL_OPTIONS[(idx + 1) % DAILY_GOAL_OPTIONS.length];
+    setDailyGoal(next);
+  }
+
+  function startWeakReview(): void {
+    const hasCurrentWeak =
+      mode === "roots"
+        ? Object.keys(missRoots).length > 0
+        : mode === "short"
+          ? baseShortPool.some((x) => (missChars[x.c] ?? 0) > 0)
+          : mode === "chars"
+            ? Object.keys(missChars).length > 0
+            : false;
+    if (hasCurrentWeak) {
+      setReview(true);
+      return;
+    }
+    if (Object.keys(missChars).length > 0) {
+      setMode("chars");
+      setShortGrade(null);
+      setShowShortTable(false);
+      setPhase("idle");
+      setReview(true);
+    } else if (Object.keys(missRoots).length > 0) {
+      setMode("roots");
+      setShortGrade(null);
+      setShowShortTable(false);
+      setPhase("idle");
+      setReview(true);
     }
   }
 
@@ -965,6 +1116,11 @@ export default function App(): JSX.Element {
     const h = (ev: globalThis.KeyboardEvent): void => {
       if (ev.isComposing) return;
       const runTimed = mode === "timed" && phase === "run";
+      if (!isMobile && shortcutsOpen && ev.key === "Escape") {
+        ev.preventDefault();
+        setShortcutsOpen(false);
+        return;
+      }
       if (!isMobile && themeOpen && ev.key === "Escape") {
         ev.preventDefault();
         clearPreview();
@@ -1026,6 +1182,12 @@ export default function App(): JSX.Element {
         return;
       }
       if (ev.metaKey || ev.ctrlKey) return;
+      if (!isMobile && ev.key === "?" && mode !== "lookup" && !(ev.target instanceof HTMLTextAreaElement)) {
+        ev.preventDefault();
+        setShortcutsOpen((o) => !o);
+        return;
+      }
+      if (!isMobile && shortcutsOpen) return;
       // 文章練習 handles its own keys (ArticleMode); 查碼 is plain text entry (LookupMode).
       if (mode === "article" || mode === "lookup" || mode === "history") return;
       const k = ev.key;
@@ -1101,6 +1263,12 @@ export default function App(): JSX.Element {
   });
 
   const busyTimed = mode === "timed" && phase === "run";
+  const todayStr = localDate();
+  const todayInfo = useMemo(() => todaySummary(history, todayStr, dailyGoal), [history, todayStr, dailyGoal]);
+  const streakDays = useMemo(() => practiceStreakDays(history, todayStr), [history, todayStr]);
+  const weakCharsCount = useMemo(() => Object.keys(missChars).length, [missChars]);
+  const weakRootsCount = useMemo(() => Object.keys(missRoots).length, [missRoots]);
+  const totalWeakCount = weakCharsCount + weakRootsCount;
   const canReview =
     mode === "roots"
       ? missedRootList.length > 0
@@ -1554,10 +1722,10 @@ export default function App(): JSX.Element {
           <div className="settings-seg settings-seg-7">
             {([
               ["roots", "字根練習"],
-              ["chars", "常用字"],
               ["short", "簡碼練習"],
-              ["timed", "限時挑戰"],
+              ["chars", "常用字"],
               ["article", "文章練習"],
+              ["timed", "限時挑戰"],
               ["lookup", "查碼"],
               ["history", "紀錄"],
             ] as [Mode, string][]).map(([v, label]) => (
@@ -1568,6 +1736,22 @@ export default function App(): JSX.Element {
                 onClick={() => switchMode(v)}
               >
                 {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="settings-block">
+          <p className="settings-label">每日目標</p>
+          <div className="settings-seg settings-seg-4">
+            {DAILY_GOAL_OPTIONS.map((g) => (
+              <button
+                key={g}
+                type="button"
+                data-testid={"mobile-goal-" + g}
+                className={"settings-chip" + (dailyGoal === g ? " is-on" : "")}
+                onClick={() => setDailyGoal(g)}
+              >
+                {g} 題
               </button>
             ))}
           </div>
@@ -1765,6 +1949,18 @@ export default function App(): JSX.Element {
       ) : null;
 
     const mobileModeStrip = <MobileModeStrip mode={mode} onChange={(v) => switchMode(v)} />;
+    const mobileTodayBar = (
+      <MobileTodayBar
+        tried={todayInfo.tried}
+        goal={todayInfo.goal}
+        pct={todayInfo.pct}
+        done={todayInfo.done}
+        streakDays={streakDays}
+        weakCount={totalWeakCount}
+        reviewOn={review}
+        onWeakReview={startWeakReview}
+      />
+    );
 
     if (mode === "history") {
       return (
@@ -1774,10 +1970,11 @@ export default function App(): JSX.Element {
             isMobile
             history={history}
             stats={{ ok, tried, streak, missChars, missRoots }}
-            settings={{ autoNext, theme: themeId, colorMode }}
+            settings={{ autoNext, theme: themeId, colorMode, dailyGoal }}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
             mobileModeStrip={mobileModeStrip}
+            mobileTodayBar={mobileTodayBar}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1799,6 +1996,7 @@ export default function App(): JSX.Element {
             reps={KEY_REPS}
             onOpenSettings={() => setShowSettings(true)}
             mobileModeStrip={mobileModeStrip}
+            mobileTodayBar={mobileTodayBar}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1828,6 +2026,7 @@ export default function App(): JSX.Element {
             onActiveChange={setArticleActive}
             onOpenSettings={() => setShowSettings(true)}
             mobileModeStrip={mobileModeStrip}
+            mobileTodayBar={mobileTodayBar}
             mobileSheets={
               <>
                 {settingsSheet}
@@ -1899,6 +2098,7 @@ export default function App(): JSX.Element {
         answer={qaAnswer}
         header={header}
         modeStrip={mobileModeStrip}
+        todayBar={mobileTodayBar}
         stage={stageInner}
         footer={footer}
         sheets={
@@ -1946,13 +2146,13 @@ export default function App(): JSX.Element {
           value={mode}
           onChange={(v) => switchMode(v)}
           options={[
-            { value: "roots", label: "字根練習", kbd: "⌥1" },
-            { value: "chars", label: "常用字", kbd: "⌥2" },
-            { value: "timed", label: "限時挑戰", kbd: "⌥3" },
-            { value: "article", label: "文章練習", kbd: "⌥4" },
-            { value: "lookup", label: "查碼", kbd: "⌥5" },
-            { value: "history", label: "紀錄", kbd: "⌥6" },
-            { value: "short", label: "簡碼練習", kbd: "⌥7" },
+            { value: "roots", label: "字根練習", kbd: "⌥1", group: "practice" },
+            { value: "short", label: "簡碼練習", kbd: "⌥7", group: "practice" },
+            { value: "chars", label: "常用字", kbd: "⌥2", group: "practice" },
+            { value: "article", label: "文章練習", kbd: "⌥4", group: "practice" },
+            { value: "timed", label: "限時挑戰", kbd: "⌥3", group: "practice" },
+            { value: "lookup", label: "查碼", kbd: "⌥5", group: "tools" },
+            { value: "history", label: "紀錄", kbd: "⌥6", group: "tools" },
           ]}
         />
 
@@ -1994,6 +2194,7 @@ export default function App(): JSX.Element {
               <Pill
                 label="複習錯字"
                 kbd="⌥R"
+                title={!canReview && !review ? "目前還沒有錯字紀錄，先練幾題再複習" : "複習錯字（⌥R）"}
                 on={review}
                 disabled={!canReview && !review}
                 onClick={() => setReview(!review)}
@@ -2015,10 +2216,18 @@ export default function App(): JSX.Element {
               onClick={() => setShowKb(!showKb)}
             />
           </div>
-          <p className="shortcut-hint">
-            <kbd className="kbd">Enter</kbd>／<kbd className="kbd">Space</kbd> 送出與下一題 ·{" "}
-            <kbd className="kbd">/</kbd> 提示 · <kbd className="kbd">Esc</kbd> 跳過
-          </p>
+          <button
+            type="button"
+            className={"ui-pill shortcuts-trigger" + (shortcutsOpen ? " is-on" : "")}
+            data-testid="shortcuts-btn"
+            aria-expanded={shortcutsOpen}
+            aria-haspopup="dialog"
+            title="開啟快捷鍵總表（?）"
+            onClick={() => setShortcutsOpen((o) => !o)}
+          >
+            <span className="shortcuts-q-mark" aria-hidden="true">?</span>
+            <span>快捷鍵</span>
+          </button>
         </div>
 
         {review &&
@@ -2342,7 +2551,7 @@ export default function App(): JSX.Element {
               isMobile={false}
               history={history}
               stats={{ ok, tried, streak, missChars, missRoots }}
-              settings={{ autoNext, theme: themeId, colorMode }}
+              settings={{ autoNext, theme: themeId, colorMode, dailyGoal }}
               onOpenSettings={() => undefined}
               onImport={importBackup}
             />
@@ -2453,6 +2662,63 @@ export default function App(): JSX.Element {
           </div>
         {mode === "lookup" || mode === "history" ? null : (
           <aside className="desktop-side-col" data-testid="desktop-sidebar">
+            <section className={"stage-card side-card today-card" + (todayInfo.done ? " is-done" : "")} data-testid="today-card">
+              <div className="today-card-top">
+                <div className="today-ring-wrap" aria-hidden="true">
+                  <svg className="today-ring" width="46" height="46" viewBox="0 0 46 46">
+                    <circle className="today-ring-bg" cx="23" cy="23" r="18" />
+                    <circle
+                      className="today-ring-fg"
+                      cx="23"
+                      cy="23"
+                      r="18"
+                      strokeDasharray={113.097}
+                      strokeDashoffset={113.097 * (1 - todayInfo.pct / 100)}
+                    />
+                  </svg>
+                  <span className="today-ring-pct">{todayInfo.done ? "✓" : todayInfo.pct + "%"}</span>
+                </div>
+                <div className="today-info">
+                  <div className="today-head-row">
+                    <h2 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>今日練功</h2>
+                    <button
+                      type="button"
+                      className="today-goal-btn"
+                      data-testid="daily-goal-btn"
+                      title="點擊切換每日目標（30／50／100／200 題）"
+                      onClick={cycleDailyGoal}
+                    >
+                      目標 {dailyGoal} 題
+                    </button>
+                  </div>
+                  <div className="today-metrics">
+                    <span>
+                      已練 <strong>{todayInfo.tried}</strong> / {dailyGoal} 題
+                    </span>
+                    <span className="today-dot" aria-hidden="true">·</span>
+                    <span className={streakDays > 0 ? "today-streak-on" : "today-streak-off"}>
+                      {streakDays > 0 ? "🔥 連續 " + streakDays + " 天" : "今天開始累積天數"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {totalWeakCount > 0 ? (
+                <button
+                  type="button"
+                  className="today-review-cta"
+                  data-testid="today-review-cta"
+                  disabled={review}
+                  onClick={startWeakReview}
+                >
+                  <span>{review ? "正在複習弱點字中" : "你有 " + totalWeakCount + " 個弱點待複習"}</span>
+                  {review ? null : <span aria-hidden="true">→</span>}
+                </button>
+              ) : (
+                <p className="today-clean-note">
+                  {todayInfo.done ? "今日目標已達成，手感保持得很好！" : "目前沒有積累弱點字，繼續保持。"}
+                </p>
+              )}
+            </section>
             <section className="stage-card side-card">
               <div className="side-card-head">
                 <h2 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>嘸蝦米鍵盤字根圖</h2>
@@ -2541,6 +2807,7 @@ export default function App(): JSX.Element {
           </button>
         </footer>
       </div>
+      {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
     </div>
   );
 }

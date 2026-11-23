@@ -52,6 +52,7 @@ export default function HistoryMode(props: {
   onOpenSettings: () => void;
   onImport: (data: BackupFile, mode: ImportMode) => void;
   mobileModeStrip?: ReactNode;
+  mobileTodayBar?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile, history } = props;
@@ -378,6 +379,7 @@ export default function HistoryMode(props: {
         theme={theme}
         header={header}
         modeStrip={props.mobileModeStrip}
+        todayBar={props.mobileTodayBar}
         stage={body}
         footer={footer}
         sheets={props.mobileSheets}

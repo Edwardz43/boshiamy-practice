@@ -83,6 +83,7 @@ export default function ArticleMode(props: {
   onActiveChange?: (info: { code: string; hintOn: boolean; bad: boolean; typed: string }) => void;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
+  mobileTodayBar?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
@@ -371,9 +372,19 @@ export default function ArticleMode(props: {
               outline: "2px solid " + (bad ? theme.text.danger : theme.brand.primary),
               borderRadius: 4,
             };
-          else if (m === "ok") style = { color: theme.text.success };
+          else if (m === "ok")
+            style = {
+              color: theme.text.success,
+              background: theme.fill.successSoft,
+              borderRadius: 3,
+            };
           else if (m === "bad" || m === "skip")
-            style = { color: theme.text.danger, textDecoration: "underline wavy" };
+            style = {
+              color: theme.text.danger,
+              background: theme.fill.dangerSoft,
+              borderRadius: 3,
+              textDecoration: "underline wavy",
+            };
           return (
             <span
               key={i}
@@ -458,21 +469,52 @@ export default function ArticleMode(props: {
       </div>
     ) : null;
 
+  const accNum = total > 0 ? Math.round((stats.okN / total) * 100) : 0;
+  const resultTier =
+    accNum === 100 && total > 0
+      ? "完美通關"
+      : accNum >= 92
+        ? "手感極佳"
+        : accNum >= 80
+          ? "穩健完成"
+          : "繼續累積";
+
   const result =
     status === "done" && art ? (
       <div className="article-result" data-testid="article-result">
-        <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>打完了！</h2>
-        <p style={{ ...theme.font.body1, margin: 0 }}>
+        <div className="article-result-head">
+          <span className={"article-badge" + (accNum >= 92 ? " is-great" : "")}>{resultTier}</span>
+          <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>打完了！</h2>
+        </div>
+        <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
           正確率 {acc}（{stats.okN} / {total} 字），用時 {mmss}，每分鐘 {cpm} 字。
         </p>
+        <div className="article-result-grid">
+          <div className="article-result-stat">
+            <span className="article-result-label">速度</span>
+            <span className="article-result-val">{cpm} 字/分</span>
+          </div>
+          <div className="article-result-stat">
+            <span className="article-result-label">正確率</span>
+            <span className="article-result-val">{acc}</span>
+          </div>
+          <div className="article-result-stat">
+            <span className="article-result-label">用時</span>
+            <span className="article-result-val">{mmss}</span>
+          </div>
+        </div>
         {missed.length ? (
           <div style={{ width: "100%" }}>
-            <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: "0 0 4px" }}>這篇打錯或跳過的字</p>
+            <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: "0 0 6px" }}>
+              這篇打錯或跳過的字（共 {missed.length} 字）
+            </p>
             <ul className="article-missed">
               {missed.map((x) => (
-                <li key={x.c} style={{ borderColor: theme.border.default }}>
-                  <span style={{ fontSize: 20, fontWeight: theme.weight.semibold }}>{x.c}</span>{" "}
-                  <span style={{ color: theme.text.secondary }}>{fmt(x.k.slice(0, 2))}</span>
+                <li key={x.c} className="article-missed-item" style={{ borderColor: theme.border.default }}>
+                  <span className="article-missed-char">{x.c}</span>
+                  <span className="article-missed-code" style={{ color: theme.text.accent }}>
+                    {fmt(x.k.slice(0, 2))}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -581,6 +623,7 @@ export default function ArticleMode(props: {
         answer={cur && cur.k ? cur.k[0] : ""}
         header={header}
         modeStrip={props.mobileModeStrip}
+        todayBar={props.mobileTodayBar}
         stage={stage}
         footer={footer}
         sheets={props.mobileSheets}

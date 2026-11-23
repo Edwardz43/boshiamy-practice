@@ -59,6 +59,7 @@ export default function LookupMode(props: {
   reps: Record<string, string>;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
+  mobileTodayBar?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
@@ -354,6 +355,7 @@ export default function LookupMode(props: {
         theme={theme}
         header={header}
         modeStrip={props.mobileModeStrip}
+        todayBar={props.mobileTodayBar}
         stage={stage}
         footer={footer}
         sheets={props.mobileSheets}
