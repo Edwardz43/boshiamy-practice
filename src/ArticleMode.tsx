@@ -78,8 +78,10 @@ export default function ArticleMode(props: {
   isMobile: boolean;
   reps: Record<string, string>;
   sheetOpen: boolean;
+  bestCpm?: number;
   onMiss: (ch: string) => void;
   onAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onFinish?: (info: { cpm: number; accuracy: number }) => void;
   onActiveChange?: (info: { code: string; hintOn: boolean; bad: boolean; typed: string }) => void;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
@@ -104,6 +106,8 @@ export default function ArticleMode(props: {
   const tableRef = useRef<Table | null>(null);
   const reqId = useRef(0);
   const lastMarkAt = useRef<number | null>(null);
+  const finishedRef = useRef(false);
+  const [isNewBest, setIsNewBest] = useState(false);
 
   function firstCodable(a: Article, from: number): number {
     for (let i = from; i < a.segs.length; i++) if (a.segs[i].k) return i;
@@ -118,6 +122,8 @@ export default function ArticleMode(props: {
     setBad(false);
     setT0(null);
     setT1(null);
+    setIsNewBest(false);
+    finishedRef.current = false;
     lastMarkAt.current = null;
     const i = firstCodable(a, 0);
     setIdx(i);
@@ -470,6 +476,16 @@ export default function ArticleMode(props: {
     ) : null;
 
   const accNum = total > 0 ? Math.round((stats.okN / total) * 100) : 0;
+  useEffect(() => {
+    if (status === "done" && !finishedRef.current) {
+      finishedRef.current = true;
+      if (cpm > 0 && (props.bestCpm == null || cpm > props.bestCpm)) {
+        setIsNewBest(true);
+      }
+      props.onFinish?.({ cpm, accuracy: accNum });
+    }
+  }, [status, cpm, accNum, props.bestCpm, props.onFinish]);
+
   const resultTier =
     accNum === 100 && total > 0
       ? "完美通關"
@@ -484,6 +500,11 @@ export default function ArticleMode(props: {
       <div className="article-result" data-testid="article-result">
         <div className="article-result-head">
           <span className={"article-badge" + (accNum >= 92 ? " is-great" : "")}>{resultTier}</span>
+          {isNewBest ? (
+            <span className="timed-new-best-badge" data-testid="article-new-best">
+              🏆 新最快紀錄！
+            </span>
+          ) : null}
           <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>打完了！</h2>
         </div>
         <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>

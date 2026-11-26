@@ -4,6 +4,8 @@ export const STATS_KEY = "boshiamy-practice-stats-v1";
 export const HISTORY_KEY = "boshiamy-practice-history-v1";
 export const AUTO_NEXT_KEY = "boshiamy-auto-next-v2";
 export const DAILY_GOAL_KEY = "boshiamy-daily-goal-v1";
+export const BESTS_KEY = "boshiamy-bests-v1";
+export const SOUND_KEY = "boshiamy-sound-v1";
 export const DAILY_GOAL_OPTIONS = [30, 50, 100, 200] as const;
 export const DEFAULT_DAILY_GOAL = 50;
 export const BACKUP_VERSION = 1;
@@ -57,10 +59,31 @@ export type BackupSettings = {
   theme?: string;
   colorMode?: string;
   dailyGoal?: number;
+  sound?: boolean;
+};
+
+export type TimedRecord = {
+  score: number;
+  tried: number;
+  diff: number;
+  date: string;
+};
+
+export type ArticleBest = {
+  cpm: number;
+  accuracy: number;
+  date: string;
+};
+
+export type PersonalBests = {
+  timedBestByDiff: Record<string, TimedRecord>;
+  timedRecent: TimedRecord[];
+  articleBestCpm?: ArticleBest;
 };
 
 const VALID_THEMES = new Set(["ink", "studio", "playful", "minimal"]);
 const VALID_COLOR_MODES = new Set(["system", "light", "dark"]);
+const VALID_DIFFS = new Set(["100", "300", "600", "1000"]);
 
 export function sanitizeDailyGoal(raw: unknown): number | undefined {
   if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
@@ -76,6 +99,7 @@ export function sanitizeSettings(raw: unknown): BackupSettings {
   if (typeof r.colorMode === "string" && VALID_COLOR_MODES.has(r.colorMode)) out.colorMode = r.colorMode;
   const g = sanitizeDailyGoal(r.dailyGoal);
   if (g != null) out.dailyGoal = g;
+  if (typeof r.sound === "boolean") out.sound = r.sound;
   return out;
 }
 
@@ -85,6 +109,7 @@ export type BackupFile = {
   stats: SavedStats;
   history: HistoryStore;
   settings: BackupSettings;
+  bests?: PersonalBests;
 };
 
 export function localDate(d: Date = new Date()): string {
@@ -387,15 +412,27 @@ export function makeBackup(input: {
   stats: SavedStats;
   history: HistoryStore;
   settings: BackupSettings;
+  bests?: PersonalBests;
   exportedAt?: string;
 }): BackupFile {
-  return {
+  const out: BackupFile = {
     version: BACKUP_VERSION,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     stats: sanitizeStats(input.stats),
     history: sanitizeHistory(input.history),
     settings: sanitizeSettings(input.settings),
   };
+  if (input.bests) {
+    const cleanBests = sanitizeBests(input.bests);
+    if (
+      Object.keys(cleanBests.timedBestByDiff).length > 0 ||
+      cleanBests.timedRecent.length > 0 ||
+      cleanBests.articleBestCpm != null
+    ) {
+      out.bests = cleanBests;
+    }
+  }
+  return out;
 }
 
 export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok: false; error: string } {
@@ -413,7 +450,7 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, error: "備份檔格式不正確。" };
   }
-  const p = parsed as Partial<BackupFile> & { history?: unknown; stats?: unknown; settings?: unknown };
+  const p = parsed as Partial<BackupFile> & { history?: unknown; stats?: unknown; settings?: unknown; bests?: unknown };
   if (typeof p.version !== "number" || p.version < 1 || p.version > BACKUP_VERSION) {
     return { ok: false, error: "這個備份檔版本無法匯入。" };
   }
@@ -424,6 +461,7 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
     stats: sanitizeStats(p.stats),
     history: sanitizeHistory(p.history ?? emptyHistory()),
     settings: sanitizeSettings(p.settings),
+    bests: p.bests !== undefined ? sanitizeBests(p.bests) : undefined,
     exportedAt: typeof p.exportedAt === "string" ? p.exportedAt : new Date().toISOString(),
   });
   return { ok: true, data };
@@ -432,21 +470,25 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
 export type ImportMode = "merge" | "replace";
 
 export function applyBackup(
-  current: { stats: SavedStats; history: HistoryStore; settings: BackupSettings },
+  current: { stats: SavedStats; history: HistoryStore; settings: BackupSettings; bests?: PersonalBests },
   incoming: BackupFile,
   mode: ImportMode,
-): { stats: SavedStats; history: HistoryStore; settings: BackupSettings } {
+): { stats: SavedStats; history: HistoryStore; settings: BackupSettings; bests: PersonalBests } {
+  const curBests = sanitizeBests(current.bests);
+  const incBests = sanitizeBests(incoming.bests);
   if (mode === "replace") {
     return {
       stats: sanitizeStats(incoming.stats),
       history: sanitizeHistory(incoming.history),
       settings: sanitizeSettings(incoming.settings),
+      bests: incBests,
     };
   }
   return {
     stats: mergeStats(current.stats, incoming.stats),
     history: mergeHistory(current.history, incoming.history),
     settings: current.settings,
+    bests: mergeBests(curBests, incBests),
   };
 }
 
@@ -550,4 +592,256 @@ export function todaySummary(
     pct: Math.min(100, Math.round((stats.tried / safeGoal) * 100)),
     done: stats.tried >= safeGoal,
   };
+}
+
+// ---- Personal bests (timed challenge & article CPM) ----
+
+export const MAX_TIMED_RECENT = 5;
+
+export function emptyBests(): PersonalBests {
+  return {
+    timedBestByDiff: Object.create(null) as Record<string, TimedRecord>,
+    timedRecent: [],
+  };
+}
+
+function sanitizeTimedRecord(raw: unknown): TimedRecord | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Partial<TimedRecord>;
+  if (typeof r.date !== "string" || !isDateKey(r.date)) return null;
+  const diffNum = typeof r.diff === "number" && Number.isFinite(r.diff) ? Math.floor(r.diff) : 0;
+  if (!VALID_DIFFS.has(String(diffNum))) return null;
+  const tried = clampInt(r.tried);
+  const score = Math.min(tried, clampInt(r.score));
+  return { score, tried, diff: diffNum, date: r.date };
+}
+
+function sanitizeArticleBest(raw: unknown): ArticleBest | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Partial<ArticleBest>;
+  if (typeof r.date !== "string" || !isDateKey(r.date)) return undefined;
+  const cpm = clampInt(r.cpm);
+  if (cpm <= 0) return undefined;
+  const accRaw = typeof r.accuracy === "number" && Number.isFinite(r.accuracy) ? r.accuracy : 0;
+  const accuracy = Math.max(0, Math.min(100, Math.round(accRaw)));
+  return { cpm, accuracy, date: r.date };
+}
+
+function isBetterTimed(a: TimedRecord, b: TimedRecord): boolean {
+  if (a.score !== b.score) return a.score > b.score;
+  const accA = a.tried > 0 ? a.score / a.tried : 0;
+  const accB = b.tried > 0 ? b.score / b.tried : 0;
+  return accA > accB;
+}
+
+export function sanitizeBests(raw: unknown): PersonalBests {
+  const out = emptyBests();
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  const r = raw as Partial<PersonalBests>;
+  if (r.timedBestByDiff && typeof r.timedBestByDiff === "object" && !Array.isArray(r.timedBestByDiff)) {
+    for (const [k, v] of Object.entries(r.timedBestByDiff as Record<string, unknown>)) {
+      if (!isSafeMapKey(k) || !VALID_DIFFS.has(k)) continue;
+      const rec = sanitizeTimedRecord(v);
+      if (rec && String(rec.diff) === k) out.timedBestByDiff[k] = rec;
+    }
+  }
+  if (Array.isArray(r.timedRecent)) {
+    for (const item of r.timedRecent) {
+      const rec = sanitizeTimedRecord(item);
+      if (rec) out.timedRecent.push(rec);
+      if (out.timedRecent.length >= MAX_TIMED_RECENT) break;
+    }
+  }
+  const art = sanitizeArticleBest(r.articleBestCpm);
+  if (art) out.articleBestCpm = art;
+  return out;
+}
+
+export function mergeBests(a: PersonalBests, b: PersonalBests): PersonalBests {
+  const cleanA = sanitizeBests(a);
+  const cleanB = sanitizeBests(b);
+  const timedBestByDiff = Object.create(null) as Record<string, TimedRecord>;
+  for (const src of [cleanA.timedBestByDiff, cleanB.timedBestByDiff]) {
+    for (const [k, rec] of Object.entries(src)) {
+      const prev = timedBestByDiff[k];
+      if (!prev || isBetterTimed(rec, prev)) timedBestByDiff[k] = rec;
+    }
+  }
+  const seen = new Set<string>();
+  const timedRecent: TimedRecord[] = [];
+  for (const rec of [...cleanA.timedRecent, ...cleanB.timedRecent]) {
+    const sig = `${rec.date}|${rec.diff}|${rec.score}|${rec.tried}`;
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    timedRecent.push(rec);
+    if (timedRecent.length >= MAX_TIMED_RECENT) break;
+  }
+  let articleBestCpm = cleanA.articleBestCpm;
+  if (cleanB.articleBestCpm && (!articleBestCpm || cleanB.articleBestCpm.cpm > articleBestCpm.cpm)) {
+    articleBestCpm = cleanB.articleBestCpm;
+  }
+  return articleBestCpm
+    ? { timedBestByDiff, timedRecent, articleBestCpm }
+    : { timedBestByDiff, timedRecent };
+}
+
+export function recordTimedRun(
+  bests: PersonalBests,
+  run: { score: number; tried: number; diff: number; date?: string },
+): { bests: PersonalBests; isNewBest: boolean; prevBest: TimedRecord | null } {
+  const clean = sanitizeBests(bests);
+  const date = run.date && isDateKey(run.date) ? run.date : localDate();
+  const diffNum = Math.floor(run.diff);
+  const key = String(diffNum);
+  const tried = clampInt(run.tried);
+  const score = Math.min(tried, clampInt(run.score));
+  const rec: TimedRecord = { score, tried, diff: diffNum, date };
+  const prevBest = clean.timedBestByDiff[key] ?? null;
+  const isNewBest = score > 0 && (!prevBest || isBetterTimed(rec, prevBest));
+  const nextByDiff: Record<string, TimedRecord> = Object.assign(
+    Object.create(null) as Record<string, TimedRecord>,
+    clean.timedBestByDiff,
+  );
+  if (VALID_DIFFS.has(key) && isNewBest) nextByDiff[key] = rec;
+  const nextRecent = VALID_DIFFS.has(key)
+    ? [rec, ...clean.timedRecent].slice(0, MAX_TIMED_RECENT)
+    : clean.timedRecent;
+  const next: PersonalBests = clean.articleBestCpm
+    ? { timedBestByDiff: nextByDiff, timedRecent: nextRecent, articleBestCpm: clean.articleBestCpm }
+    : { timedBestByDiff: nextByDiff, timedRecent: nextRecent };
+  return { bests: next, isNewBest, prevBest };
+}
+
+export function recordArticleRun(
+  bests: PersonalBests,
+  run: { cpm: number; accuracy: number; date?: string },
+): { bests: PersonalBests; isNewBest: boolean; prevBest: ArticleBest | null } {
+  const clean = sanitizeBests(bests);
+  const prevBest = clean.articleBestCpm ?? null;
+  const cpm = clampInt(run.cpm);
+  const accuracy = Math.max(0, Math.min(100, Math.round(Number.isFinite(run.accuracy) ? run.accuracy : 0)));
+  const date = run.date && isDateKey(run.date) ? run.date : localDate();
+  if (cpm <= 0) return { bests: clean, isNewBest: false, prevBest };
+  const isNewBest = !prevBest || cpm > prevBest.cpm;
+  if (!isNewBest) return { bests: clean, isNewBest: false, prevBest };
+  const next: PersonalBests = {
+    timedBestByDiff: clean.timedBestByDiff,
+    timedRecent: clean.timedRecent,
+    articleBestCpm: { cpm, accuracy, date },
+  };
+  return { bests: next, isNewBest: true, prevBest };
+}
+
+export function loadBestsFromStorage(getItem: (k: string) => string | null): PersonalBests {
+  try {
+    const raw = getItem(BESTS_KEY);
+    if (!raw) return emptyBests();
+    return sanitizeBests(JSON.parse(raw) as unknown);
+  } catch {
+    return emptyBests();
+  }
+}
+
+export function saveBestsToStorage(setItem: (k: string, v: string) => void, bests: PersonalBests): void {
+  setItem(BESTS_KEY, JSON.stringify(sanitizeBests(bests)));
+}
+
+// ---- History heatmap, weak items ranking, and period delta ----
+
+export type HeatmapCell = {
+  date: string;
+  tried: number;
+  ok: number;
+  level: 0 | 1 | 2 | 3 | 4;
+  future: boolean;
+};
+
+export function heatmapLevel(tried: number): 0 | 1 | 2 | 3 | 4 {
+  if (tried <= 0) return 0;
+  if (tried < 20) return 1;
+  if (tried < 50) return 2;
+  if (tried < 100) return 3;
+  return 4;
+}
+
+/** Build `weeks` columns (Sun..Sat, 7 rows each) ending on the week containing `endDate`. */
+export function heatmapWeeks(history: HistoryStore, endDate = localDate(), weeks = 12): HeatmapCell[][] {
+  if (!isDateKey(endDate) || weeks <= 0) return [];
+  const [y, m, d] = endDate.split("-").map(Number);
+  const endDt = new Date(y, m - 1, d);
+  const dow = endDt.getDay(); // 0 = Sun .. 6 = Sat
+  const endWeekSun = addDays(endDate, -dow);
+  const startSun = addDays(endWeekSun, -(weeks - 1) * 7);
+  const cols: HeatmapCell[][] = [];
+  for (let w = 0; w < weeks; w++) {
+    const col: HeatmapCell[] = [];
+    for (let r = 0; r < 7; r++) {
+      const date = addDays(startSun, w * 7 + r);
+      const future = date > endDate;
+      const stats = future ? emptyMode() : dayTotals(history.days[date], "all");
+      col.push({
+        date,
+        tried: stats.tried,
+        ok: stats.ok,
+        level: future ? 0 : heatmapLevel(stats.tried),
+        future,
+      });
+    }
+    cols.push(col);
+  }
+  return cols;
+}
+
+export type WeakRankItem = {
+  kind: "char" | "root";
+  key: string;
+  glyph: string;
+  sub?: string;
+  count: number;
+};
+
+export function topWeakItems(
+  missChars: Record<string, number>,
+  missRoots: Record<string, number>,
+  limit = 20,
+): WeakRankItem[] {
+  const items: WeakRankItem[] = [];
+  for (const [k, v] of Object.entries(missChars)) {
+    if (typeof v !== "number" || v <= 0) continue;
+    items.push({ kind: "char", key: "char:" + k, glyph: k, count: v });
+  }
+  for (const [k, v] of Object.entries(missRoots)) {
+    if (typeof v !== "number" || v <= 0) continue;
+    const colon = k.indexOf(":");
+    const keyLetter = colon > 0 ? k.slice(0, colon).toUpperCase() : "";
+    const glyph = colon >= 0 ? k.slice(colon + 1) : k;
+    items.push({
+      kind: "root",
+      key: "root:" + k,
+      glyph: glyph || k,
+      sub: keyLetter || undefined,
+      count: v,
+    });
+  }
+  items.sort((a, b) => (b.count !== a.count ? b.count - a.count : a.key.localeCompare(b.key)));
+  return items.slice(0, Math.max(0, limit));
+}
+
+export function periodDelta(
+  history: HistoryStore,
+  endDate: string,
+  length: number,
+  mode: DrillMode | "all" = "all",
+): { triedDiff: number | null; accDiffPct: number | null } {
+  if (!isDateKey(endDate) || length <= 0) return { triedDiff: null, accDiffPct: null };
+  const cur = rangeTotals(history, endDate, length, mode);
+  const prevEnd = addDays(endDate, -length);
+  const prev = rangeTotals(history, prevEnd, length, mode);
+  if (prev.tried <= 0) return { triedDiff: null, accDiffPct: null };
+  const triedDiff = cur.tried - prev.tried;
+  const curAcc = accuracyOf(cur);
+  const prevAcc = accuracyOf(prev);
+  const accDiffPct =
+    curAcc != null && prevAcc != null ? Math.round((curAcc - prevAcc) * 100) : null;
+  return { triedDiff, accDiffPct };
 }

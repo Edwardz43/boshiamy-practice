@@ -7,6 +7,7 @@ import {
   detectMode,
   lookupCode,
   lookupText,
+  lookupTokens,
   parseCodes,
   variantsOf,
   type ReverseIndex,
@@ -69,8 +70,25 @@ export default function LookupMode(props: {
   const [value, setValue] = useState<string>("");
   // What we actually look up; frozen while an IME is composing so half-typed pinyin/zhuyin isn't queried.
   const [query, setQuery] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"list" | "ruby">("list");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copyTimer = useRef<number | null>(null);
   const composing = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function copyCode(text: string, key: string): void {
+    if (!text) return;
+    const markCopied = (): void => {
+      setCopiedKey(key);
+      if (copyTimer.current != null) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopiedKey(null), 1400);
+    };
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(text).then(markCopied).catch(markCopied);
+    } else {
+      markCopied();
+    }
+  }
 
   function load(): void {
     setStatus("loading");
@@ -94,6 +112,10 @@ export default function LookupMode(props: {
   const kind = detectMode(query);
 
   const forward = useMemo(() => (table && kind === "forward" ? lookupText(table, query) : null), [table, kind, query]);
+  const rubyRes = useMemo(
+    () => (table && kind === "forward" && viewMode === "ruby" ? lookupTokens(table, query) : null),
+    [table, kind, query, viewMode],
+  );
   const codes = useMemo(() => (kind === "reverse" ? parseCodes(query) : []), [kind, query]);
   const reverseRes = useMemo(
     () => (reverse && kind === "reverse" ? codes.map((c) => lookupCode(reverse, c)) : []),
@@ -214,39 +236,141 @@ export default function LookupMode(props: {
     );
   } else if (forward) {
     const found = forward.results.filter((r) => r.found).length;
+    const bestCodeFor = (r: (typeof forward.results)[number]): string => {
+      if (!r.found || r.codes.length === 0) return "";
+      const shortest = r.codes.find((x) => x.shortest);
+      return up((shortest ?? r.codes[0]).code);
+    };
+    const allCodesStr = forward.results
+      .filter((r) => r.found && r.codes.length > 0)
+      .map((r) => r.c + ":" + bestCodeFor(r))
+      .join(" ");
     body = (
       <>
-        <p className="lookup-summary" style={{ color: theme.text.secondary }} data-testid="lookup-summary">
-          共 {forward.total} 個字（重複的只列一次）
-          {forward.total - found > 0 ? "，其中 " + (forward.total - found) + " 個查無" : ""}
-          {forward.truncated ? "。只顯示前 400 個" : ""}
-        </p>
-        <ul className="lookup-list" data-testid="lookup-results">
-          {forward.results.map((r) => (
-            <li key={r.c} className="lookup-row" data-char={r.c}>
-              <span className="lookup-glyph">{r.c}</span>
-              {r.found ? (
-                <span className="lookup-codes">
-                  {r.codes.map((x, i) => codeChip(x.code, x.shortest, x.pick, r.c + i))}
-                  <span className="lookup-roots" style={{ color: theme.text.tertiary }}>
-                    {r.codes[0].code
-                      .split("")
-                      .map((ch) => up(ch) + (props.reps[ch] ? " " + props.reps[ch] : ""))
-                      .join("　")}
+        <div className="lookup-toolbar">
+          <p className="lookup-summary" style={{ color: theme.text.secondary, margin: 0 }} data-testid="lookup-summary">
+            共 {forward.total} 個字（重複的只列一次）
+            {forward.total - found > 0 ? "，其中 " + (forward.total - found) + " 個查無" : ""}
+            {forward.truncated ? "。只顯示前 400 個" : ""}
+          </p>
+          <div className="lookup-view-controls">
+            <div className="lookup-view-seg" role="group" aria-label="顯示方式">
+              <button
+                type="button"
+                data-testid="lookup-view-list"
+                aria-pressed={viewMode === "list"}
+                className={"ui-pill" + (viewMode === "list" ? " is-on" : "")}
+                onClick={() => setViewMode("list")}
+              >
+                清單
+              </button>
+              <button
+                type="button"
+                data-testid="lookup-view-ruby"
+                aria-pressed={viewMode === "ruby"}
+                className={"ui-pill" + (viewMode === "ruby" ? " is-on" : "")}
+                onClick={() => setViewMode("ruby")}
+              >
+                Ruby 標註
+              </button>
+            </div>
+            {found > 0 ? (
+              <button
+                type="button"
+                className="lookup-copy-btn"
+                data-testid="lookup-copy-all"
+                onClick={() => copyCode(allCodesStr, "__all__")}
+              >
+                {copiedKey === "__all__" ? "已複製全部 ✓" : "複製全部字碼"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {viewMode === "ruby" && rubyRes ? (
+          <div className="lookup-ruby-box" data-testid="lookup-ruby">
+            {rubyRes.tokens.map((tk, i) => {
+              if (tk.isBreak) return <br key={"br-" + i} />;
+              if (!tk.isCjk) {
+                return (
+                  <span key={"txt-" + i} className="lookup-ruby-plain">
+                    {tk.c}
                   </span>
-                  {variantBlock(r.c)}
-                </span>
-              ) : (
-                <span className="lookup-codes">
-                  <span className="lookup-missing" style={{ color: theme.text.danger }}>
-                    查無
-                  </span>
-                  {variantBlock(r.c)}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+                );
+              }
+              if (!tk.found || !tk.code) {
+                return (
+                  <ruby key={"miss-" + i} className="lookup-ruby-item is-missing" data-char={tk.c}>
+                    {tk.c}
+                    <rp>(</rp>
+                    <rt>?</rt>
+                    <rp>)</rp>
+                  </ruby>
+                );
+              }
+              const upper = up(tk.code);
+              const k = "ruby-" + i;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  className={"lookup-ruby-btn" + (tk.pick ? " is-pick" : "") + (copiedKey === k ? " is-copied" : "")}
+                  title={tk.pick ? upper + "（要選字），點一下複製" : upper + "，點一下複製"}
+                  onClick={() => copyCode(upper, k)}
+                >
+                  <ruby className="lookup-ruby-item" data-char={tk.c}>
+                    {tk.c}
+                    <rp>(</rp>
+                    <rt>{copiedKey === k ? "✓" : upper}</rt>
+                    <rp>)</rp>
+                  </ruby>
+                </button>
+              );
+            })}
+            <p className="lookup-ruby-hint" style={{ color: theme.text.tertiary }}>
+              點任意中文字可複製最短字碼；虛線底字表示需選字。
+            </p>
+          </div>
+        ) : (
+          <ul className="lookup-list" data-testid="lookup-results">
+            {forward.results.map((r) => {
+              const primaryCode = bestCodeFor(r);
+              const cKey = "row-" + r.c;
+              return (
+                <li key={r.c} className="lookup-row" data-char={r.c}>
+                  <span className="lookup-glyph">{r.c}</span>
+                  {r.found ? (
+                    <span className="lookup-codes">
+                      {r.codes.map((x, i) => codeChip(x.code, x.shortest, x.pick, r.c + i))}
+                      <button
+                        type="button"
+                        className="lookup-copy-btn"
+                        data-testid="lookup-copy-btn"
+                        aria-label={"複製「" + r.c + "」字碼 " + primaryCode}
+                        onClick={() => copyCode(primaryCode, cKey)}
+                      >
+                        {copiedKey === cKey ? "已複製 ✓" : "複製"}
+                      </button>
+                      <span className="lookup-roots" style={{ color: theme.text.tertiary }}>
+                        {r.codes[0].code
+                          .split("")
+                          .map((ch) => up(ch) + (props.reps[ch] ? " " + props.reps[ch] : ""))
+                          .join("　")}
+                      </span>
+                      {variantBlock(r.c)}
+                    </span>
+                  ) : (
+                    <span className="lookup-codes">
+                      <span className="lookup-missing" style={{ color: theme.text.danger }}>
+                        查無
+                      </span>
+                      {variantBlock(r.c)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </>
     );
   } else {

@@ -296,6 +296,84 @@ assert.equal(parsed1.data.exportedAt, backup.exportedAt);
   assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 100 }), { autoNext: false, dailyGoal: 100 });
   assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 3 }), { autoNext: false });
   assert.deepEqual(H.sanitizeSettings({ autoNext: false, dailyGoal: 9999 }), { autoNext: false });
+  assert.deepEqual(H.sanitizeSettings({ autoNext: false, sound: true }), { autoNext: false, sound: true });
+}
+
+// P3: heatmapWeeks, topWeakItems, periodDelta, personal bests & backup round-trip
+{
+  let h4 = H.emptyHistory();
+  h4 = H.recordAttempt(h4, "chars", { tried: 120, ok: 108, ms: 60000 }, "2026-11-19");
+  h4 = H.recordAttempt(h4, "roots", { tried: 25, ok: 20, ms: 25000 }, "2026-11-18");
+  h4 = H.recordAttempt(h4, "chars", { tried: 10, ok: 5, ms: 10000 }, "2026-11-12");
+
+  const cols = H.heatmapWeeks(h4, "2026-11-19", 12);
+  assert.equal(cols.length, 12);
+  for (const c of cols) assert.equal(c.length, 7);
+  const flat = cols.flat();
+  const c19 = flat.find((x) => x.date === "2026-11-19");
+  const c18 = flat.find((x) => x.date === "2026-11-18");
+  const c20 = flat.find((x) => x.date === "2026-11-20");
+  assert.equal(c19?.level, 4);
+  assert.equal(c19?.future, false);
+  assert.equal(c18?.level, 2);
+  assert.equal(c20?.future, true);
+
+  const delta = H.periodDelta(h4, "2026-11-19", 7, "all");
+  assert.equal(delta.triedDiff, 145 - 10);
+  assert.equal(delta.accDiffPct, Math.round((128 / 145) * 100) - 50);
+  const noPrev = H.periodDelta(h4, "2026-11-12", 7, "all");
+  assert.deepEqual(noPrev, { triedDiff: null, accDiffPct: null });
+
+  const weak = H.topWeakItems({ 我: 5, 的: 2 }, { "a:日": 7, "b:月": 1 }, 3);
+  assert.deepEqual(
+    weak.map((x) => [x.kind, x.glyph, x.sub ?? null, x.count]),
+    [
+      ["root", "日", "A", 7],
+      ["char", "我", null, 5],
+      ["char", "的", null, 2],
+    ],
+  );
+
+  // Personal bests
+  let b0 = H.emptyBests();
+  const r1 = H.recordTimedRun(b0, { score: 18, tried: 20, diff: 100, date: "2026-11-18" });
+  assert.equal(r1.isNewBest, true);
+  assert.equal(r1.bests.timedBestByDiff["100"].score, 18);
+  const r2 = H.recordTimedRun(r1.bests, { score: 15, tried: 20, diff: 100, date: "2026-11-19" });
+  assert.equal(r2.isNewBest, false);
+  assert.equal(r2.bests.timedBestByDiff["100"].score, 18);
+  assert.equal(r2.bests.timedRecent.length, 2);
+
+  const a1 = H.recordArticleRun(r2.bests, { cpm: 42, accuracy: 96, date: "2026-11-19" });
+  assert.equal(a1.isNewBest, true);
+  assert.equal(a1.bests.articleBestCpm?.cpm, 42);
+
+  // Backup round-trip with bests + sound + prototype pollution guard
+  const bk = H.makeBackup({
+    stats: statsA,
+    history: h4,
+    settings: { autoNext: false, sound: true },
+    bests: a1.bests,
+    exportedAt: "2026-11-19T00:00:00.000Z",
+  });
+  const parsedBk = H.parseBackup(H.backupToJson(bk));
+  assert.equal(parsedBk.ok, true);
+  assert.equal(parsedBk.data.settings.sound, true);
+  assert.equal(parsedBk.data.bests?.timedBestByDiff["100"]?.score, 18);
+  assert.equal(parsedBk.data.bests?.articleBestCpm?.cpm, 42);
+
+  const dirtyBests = H.sanitizeBests({
+    timedBestByDiff: {
+      __proto__: { score: 99, tried: 99, diff: 100, date: "2026-11-19" },
+      "999": { score: 10, tried: 10, diff: 999, date: "2026-11-19" },
+      "300": { score: 25, tried: 20, diff: 300, date: "2026-11-19" },
+    },
+    timedRecent: [{ score: 5, tried: 5, diff: 100, date: "bad-date" }],
+  });
+  assert.equal(Object.getPrototypeOf(dirtyBests.timedBestByDiff), null);
+  assert.equal(dirtyBests.timedBestByDiff["999"], undefined);
+  assert.equal(dirtyBests.timedBestByDiff["300"].score, 20);
+  assert.equal(dirtyBests.timedRecent.length, 0);
 }
 
 console.log("ALL OK");

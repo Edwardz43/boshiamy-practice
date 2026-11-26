@@ -112,3 +112,56 @@ export function variantsOf(table: Table, vars: Variants | null, ch: string): Var
   if (t && t.length) out.push({ kind: "trad", items: t.map((x) => lookupChar(table, x)) });
   return out;
 }
+
+export type RubyToken = {
+  c: string;
+  isBreak: boolean;
+  isCjk: boolean;
+  code: string | null;
+  found: boolean;
+  pick: boolean;
+};
+
+/** Tokenize text in original order for Ruby-style lookup view (one shortest direct code per CJK char). */
+export function lookupTokens(table: Table, text: string): { tokens: RubyToken[]; cjkCount: number; truncated: boolean } {
+  const tokens: RubyToken[] = [];
+  let cjkCount = 0;
+  let truncated = false;
+  for (const raw of Array.from(text)) {
+    if (raw === "\r") continue;
+    if (raw === "\n") {
+      tokens.push({ c: "\n", isBreak: true, isCjk: false, code: null, found: false, pick: false });
+      continue;
+    }
+    const cjk = isCjk(raw) || !!table[raw];
+    if (!cjk) {
+      tokens.push({ c: raw, isBreak: false, isCjk: false, code: null, found: false, pick: false });
+      continue;
+    }
+    cjkCount += 1;
+    if (cjkCount > MAX_CHARS) {
+      truncated = true;
+      continue;
+    }
+    const res = lookupChar(table, raw);
+    if (!res.found || res.codes.length === 0) {
+      tokens.push({ c: raw, isBreak: false, isCjk: true, code: null, found: false, pick: false });
+      continue;
+    }
+    const direct = res.codes.filter((x) => !x.pick);
+    const pool = direct.length ? direct : res.codes;
+    let best = pool[0];
+    for (const item of pool) {
+      if (item.code.length < best.code.length) best = item;
+    }
+    tokens.push({
+      c: raw,
+      isBreak: false,
+      isCjk: true,
+      code: best.code,
+      found: true,
+      pick: best.pick,
+    });
+  }
+  return { tokens, cjkCount, truncated };
+}

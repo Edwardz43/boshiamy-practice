@@ -54,4 +54,13 @@ assert.equal(L.variantsOf(table, null, "蝦").length, 0);
 // 簡體字若碼表沒有 -> 查無
 const miss = Object.keys(vars.t2s).filter((t) => vars.t2s[t].some((s) => !table[s]));
 console.log("traditional chars with a simplified form missing from table:", miss.length, miss.slice(0, 8).join(""));
+
+// P3: lookupTokens (Ruby view tokenization)
+const rt = L.lookupTokens(table, "我的，\n発!");
+assert.equal(rt.cjkCount, 3);
+assert.equal(rt.truncated, false);
+assert.deepEqual(
+  rt.tokens.map((x) => (x.isBreak ? "\\n" : x.isCjk ? x.c + ":" + (x.found ? x.code : "?") : x.c)),
+  ["我:ix", "的:d", "，", "\\n", "発:?", "!"],
+);
 console.log("ALL OK");

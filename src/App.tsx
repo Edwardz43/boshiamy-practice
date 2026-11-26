@@ -18,22 +18,32 @@ import {
   type DrillMode,
   type HistoryStore,
   type ImportMode,
+  type PersonalBests,
+  type TimedRecord,
+  BESTS_KEY,
   DAILY_GOAL_KEY,
   DAILY_GOAL_OPTIONS,
   DEFAULT_DAILY_GOAL,
   HISTORY_KEY,
+  SOUND_KEY,
   applyBackup,
   clipMs,
+  emptyBests,
   emptyHistory,
+  loadBestsFromStorage,
   loadHistoryFromStorage,
   localDate,
   practiceStreakDays,
+  recordArticleRun,
   recordAttempt,
+  recordTimedRun,
   sanitizeDailyGoal,
   sanitizeStats,
+  saveBestsToStorage,
   saveHistoryToStorage,
   todaySummary,
 } from "./historyLogic";
+import { playBadSound, playComboSound, playFanfareSound, playKeySound, playOkSound } from "./sound";
 import {
   SHORT_TIERS,
   type ShortGradeResult,
@@ -80,6 +90,18 @@ function loadDailyGoal(): number {
   } catch {
     return DEFAULT_DAILY_GOAL;
   }
+}
+
+function loadSoundOn(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function isComboMilestone(n: number): boolean {
+  return n === 10 || n === 25 || (n >= 50 && n % 50 === 0);
 }
 
 
@@ -670,7 +692,10 @@ export default function App(): JSX.Element {
     loadAutoNext(false),
   );
   const [dailyGoal, setDailyGoal] = useState<number>(() => loadDailyGoal());
+  const [soundOn, setSoundOn] = useState<boolean>(() => loadSoundOn());
   const [shortcutsOpen, setShortcutsOpen] = useState<boolean>(false);
+  const [comboBurst, setComboBurst] = useState<{ value: number; tick: number } | null>(null);
+  const comboTimerRef = useRef<number | null>(null);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const autoNextRef = useRef<number | null>(null);
   const charBag = useRef<DrawBag>(createBag());
@@ -707,6 +732,19 @@ export default function App(): JSX.Element {
       }
     }),
   );
+  const [bests, setBests] = useState<PersonalBests>(() =>
+    loadBestsFromStorage((k) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const [timedRunSummary, setTimedRunSummary] = useState<{ isNewBest: boolean; prevBest: TimedRecord | null } | null>(
+    null,
+  );
+  const timedRecordedRef = useRef<boolean>(false);
   const qStartedAt = useRef<number>(Date.now());
 
   const [phase, setPhase] = useState<TimedPhase>("idle");
@@ -859,6 +897,38 @@ export default function App(): JSX.Element {
   }, [dailyGoal]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(SOUND_KEY, soundOn ? "1" : "0");
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [soundOn]);
+
+  useEffect(() => {
+    try {
+      saveBestsToStorage((k, v) => localStorage.setItem(k, v), bests);
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [bests]);
+
+  useEffect(() => {
+    return () => {
+      if (comboTimerRef.current != null) window.clearTimeout(comboTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (mode === "timed" && phase === "over" && !timedRecordedRef.current) {
+      timedRecordedRef.current = true;
+      const res = recordTimedRun(bests, { score: tOk, tried: tTried, diff, date: localDate() });
+      setBests(res.bests);
+      setTimedRunSummary({ isNewBest: res.isNewBest, prevBest: res.prevBest });
+      if (res.isNewBest && soundOn) playFanfareSound();
+    }
+  }, [mode, phase, tOk, tTried, diff, bests, soundOn]);
+
+  useEffect(() => {
     const root = document.documentElement;
     if (isMobile) root.classList.add("mobile-practice");
     else root.classList.remove("mobile-practice");
@@ -888,10 +958,13 @@ export default function App(): JSX.Element {
     setMissChars({});
     setMissRoots({});
     setHistory(emptyHistory());
+    setBests(emptyBests());
+    setTimedRunSummary(null);
     setReview(false);
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(HISTORY_KEY);
+      localStorage.removeItem(BESTS_KEY);
     } catch {
       /* ignore */
     }
@@ -909,7 +982,8 @@ export default function App(): JSX.Element {
       {
         stats: { ok, tried, streak, missChars, missRoots },
         history,
-        settings: { autoNext, theme: themeId, colorMode, dailyGoal },
+        settings: { autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn },
+        bests,
       },
       data,
       how,
@@ -920,12 +994,14 @@ export default function App(): JSX.Element {
     setMissChars(next.stats.missChars);
     setMissRoots(next.stats.missRoots);
     setHistory(next.history);
+    setBests(next.bests);
     if (how === "replace") {
       setAutoNext(next.settings.autoNext);
       if (isThemeId(next.settings.theme)) setThemeId(next.settings.theme);
       if (isColorMode(next.settings.colorMode)) setColorMode(next.settings.colorMode);
       const g = sanitizeDailyGoal(next.settings.dailyGoal);
       if (g != null) setDailyGoal(g);
+      if (typeof next.settings.sound === "boolean") setSoundOn(next.settings.sound);
     }
   }
 
@@ -975,12 +1051,22 @@ export default function App(): JSX.Element {
     setAnimTick((n) => n + 1);
     setTried((n) => n + 1);
     if (correct) {
+      const nextStreak = streak + 1;
       setOk((n) => n + 1);
-      setStreak((n) => n + 1);
+      setStreak(nextStreak);
       setVerdict("ok");
+      if (isComboMilestone(nextStreak)) {
+        setComboBurst({ value: nextStreak, tick: Date.now() });
+        if (comboTimerRef.current != null) window.clearTimeout(comboTimerRef.current);
+        comboTimerRef.current = window.setTimeout(() => setComboBurst(null), 1400);
+        if (soundOn) playComboSound();
+      } else if (soundOn) {
+        playOkSound();
+      }
     } else {
       setStreak(0);
       setVerdict("bad");
+      if (soundOn) playBadSound();
     }
   }
 
@@ -1038,6 +1124,8 @@ export default function App(): JSX.Element {
 
   function startTimed(): void {
     if (timerRef.current != null) window.clearInterval(timerRef.current);
+    timedRecordedRef.current = false;
+    setTimedRunSummary(null);
     setPhase("run");
     setLeft(60);
     setTOk(0);
@@ -1078,6 +1166,7 @@ export default function App(): JSX.Element {
 
   function typeLetter(letter: string): void {
     if (verdict !== "idle") return;
+    if (soundOn) playKeySound();
     const maxLen = mode === "roots" ? 2 : 6;
     setTyped((t) => (t + letter.toLowerCase()).slice(0, maxLen));
   }
@@ -1383,6 +1472,13 @@ export default function App(): JSX.Element {
     }
   }
 
+  const curTimedBest = bests.timedBestByDiff[String(diff)] ?? null;
+  const comboToastEl = comboBurst ? (
+    <div key={comboBurst.tick} className="combo-toast" data-testid="combo-toast" role="status" aria-live="polite">
+      🔥 {comboBurst.value} 連對！
+    </div>
+  ) : null;
+
   if (isMobile) {
     const qaAnswer =
       mode === "roots" && rootQ
@@ -1662,6 +1758,11 @@ export default function App(): JSX.Element {
             <p className="mobile-msg" style={{ color: theme.text.secondary }}>
               60 秒限時，練教育部字頻前 {diff} 字。結束會看得分、正確率和每分鐘字數。
             </p>
+            {curTimedBest ? (
+              <div className="timed-best-badge" data-testid="timed-best-badge">
+                🏆 個人最佳（前 {diff} 字）：{curTimedBest.score} 字／分（正確率 {pct(curTimedBest.score, curTimedBest.tried)}）
+              </div>
+            ) : null}
           </div>
         );
       } else if (phase === "run" && charQ) {
@@ -1692,11 +1793,43 @@ export default function App(): JSX.Element {
         );
       } else {
         stageInner = (
-          <div className="mobile-q">
-            <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>時間到！</h2>
+          <div className="mobile-q timed-result-card" data-testid="timed-result">
+            <div className="timed-result-head">
+              {timedRunSummary?.isNewBest ? (
+                <span className="timed-new-best-badge" data-testid="timed-new-best">
+                  🏆 破個人紀錄！
+                </span>
+              ) : null}
+              <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>時間到！</h2>
+            </div>
             <p className="mobile-msg">
               得分 {tOk} ，正確率 {pct(tOk, tTried)} ，{tOk} 字／分。
             </p>
+            <div className="timed-result-grid">
+              <div className="timed-result-stat">
+                <span className="timed-result-label">得分</span>
+                <span className="timed-result-val">{tOk} 字/分</span>
+              </div>
+              <div className="timed-result-stat">
+                <span className="timed-result-label">正確率</span>
+                <span className="timed-result-val">{pct(tOk, tTried)}</span>
+              </div>
+              <div className="timed-result-stat">
+                <span className="timed-result-label">個人最佳</span>
+                <span className="timed-result-val">
+                  {curTimedBest ? curTimedBest.score + " 字/分" : "—"}
+                </span>
+              </div>
+            </div>
+            {bests.timedRecent.length > 0 ? (
+              <div className="timed-recent-list">
+                {bests.timedRecent.slice(0, 5).map((r, i) => (
+                  <span key={r.date + "-" + i} className="timed-recent-chip">
+                    {r.date.slice(5)} · 前{r.diff} · {r.score} 字/分
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         );
       }
@@ -1858,6 +1991,16 @@ export default function App(): JSX.Element {
           <button
             type="button"
             className="settings-chip"
+            data-testid="mobile-sound-toggle"
+            aria-pressed={soundOn}
+            style={{ width: "100%" }}
+            onClick={() => setSoundOn((s) => !s)}
+          >
+            {soundOn ? "🔊 答題音效：開啟" : "🔇 答題音效：關閉"}
+          </button>
+          <button
+            type="button"
+            className="settings-chip"
             style={{ width: "100%", color: theme.text.danger }}
             onClick={clearRecords}
           >
@@ -1970,7 +2113,9 @@ export default function App(): JSX.Element {
             isMobile
             history={history}
             stats={{ ok, tried, streak, missChars, missRoots }}
-            settings={{ autoNext, theme: themeId, colorMode, dailyGoal }}
+            settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
+            bests={bests}
+            onStartWeakReview={startWeakReview}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
             mobileModeStrip={mobileModeStrip}
@@ -2017,11 +2162,23 @@ export default function App(): JSX.Element {
             isMobile
             reps={KEY_REPS}
             sheetOpen={showSettings || showKb}
+            bestCpm={bests.articleBestCpm?.cpm}
             onMiss={(ch) => {
               if (CHAR_SET.has(ch)) markMissChar(ch);
             }}
             onAttempt={({ correct, ms }) => {
               setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+              if (soundOn) {
+                if (correct) playOkSound();
+                else playBadSound();
+              }
+            }}
+            onFinish={({ cpm, accuracy }) => {
+              const res = recordArticleRun(bests, { cpm, accuracy, date: localDate() });
+              if (res.isNewBest) {
+                setBests(res.bests);
+                if (soundOn) playFanfareSound();
+              }
             }}
             onActiveChange={setArticleActive}
             onOpenSettings={() => setShowSettings(true)}
@@ -2093,7 +2250,7 @@ export default function App(): JSX.Element {
 
     // Timed already auto-advances after submit, so 送出 stays disabled until the next question.
     return (
-      <MobileShell
+          <MobileShell
         theme={theme}
         answer={qaAnswer}
         header={header}
@@ -2103,6 +2260,7 @@ export default function App(): JSX.Element {
         footer={footer}
         sheets={
           <>
+            {comboToastEl}
             {settingsSheet}
             {chartSheet}
             {shortTableSheet}
@@ -2125,7 +2283,13 @@ export default function App(): JSX.Element {
           </div>
           <div className="app-topbar-right">
             <div className="app-stats-strip">
-              <div className={"stat-pill" + (streak >= 10 ? " is-streak-hot" : streak >= 3 ? " is-streak-warm" : "")}>
+              <div
+                className={
+                  "stat-pill" +
+                  (streak >= 10 ? " is-streak-hot" : streak >= 3 ? " is-streak-warm" : "") +
+                  (comboBurst ? " is-combo-pop" : "")
+                }
+              >
                 <span className="stat-pill-label">{streak >= 3 ? "🔥 連對" : "連對"}</span>
                 <span className="stat-pill-val">{streak}</span>
               </div>
@@ -2138,6 +2302,17 @@ export default function App(): JSX.Element {
                 <span className="stat-pill-val">{ok} / {tried}</span>
               </div>
             </div>
+            <button
+              type="button"
+              className={"ui-pill sound-toggle-btn" + (soundOn ? " is-on" : "")}
+              data-testid="sound-toggle"
+              aria-pressed={soundOn}
+              title={soundOn ? "關閉答題音效" : "開啟答題音效"}
+              onClick={() => setSoundOn((s) => !s)}
+            >
+              <span aria-hidden="true">{soundOn ? "🔊" : "🔇"}</span>
+              <span>{soundOn ? "音效" : "靜音"}</span>
+            </button>
             <DesktopThemeBar open={themeOpen} onOpenChange={setThemeOpen} />
           </div>
         </header>
@@ -2273,7 +2448,11 @@ export default function App(): JSX.Element {
                   <input
                     ref={inputRef}
                     value={typed}
-                    onChange={(e) => setTyped(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (soundOn && next.length > typed.length) playKeySound();
+                      setTyped(next);
+                    }}
                     aria-label="字根對應按鍵"
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -2389,7 +2568,11 @@ export default function App(): JSX.Element {
                 <input
                   ref={inputRef}
                   value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (soundOn && next.length > typed.length) playKeySound();
+                    setTyped(next);
+                  }}
                   aria-label="嘸蝦米字碼"
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -2477,7 +2660,11 @@ export default function App(): JSX.Element {
                   <input
                     ref={inputRef}
                     value={typed}
-                    onChange={(e) => setTyped(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (soundOn && next.length > typed.length) playKeySound();
+                      setTyped(next);
+                    }}
                     aria-label="嘸蝦米簡碼"
                     autoCapitalize="none"
                     autoCorrect="off"
@@ -2551,7 +2738,9 @@ export default function App(): JSX.Element {
               isMobile={false}
               history={history}
               stats={{ ok, tried, streak, missChars, missRoots }}
-              settings={{ autoNext, theme: themeId, colorMode, dailyGoal }}
+              settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
+              bests={bests}
+              onStartWeakReview={startWeakReview}
               onOpenSettings={() => undefined}
               onImport={importBackup}
             />
@@ -2565,11 +2754,23 @@ export default function App(): JSX.Element {
               isMobile={false}
               reps={KEY_REPS}
               sheetOpen={false}
+              bestCpm={bests.articleBestCpm?.cpm}
               onMiss={(ch) => {
                 if (CHAR_SET.has(ch)) markMissChar(ch);
               }}
               onAttempt={({ correct, ms }) => {
                 setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+                if (soundOn) {
+                  if (correct) playOkSound();
+                  else playBadSound();
+                }
+              }}
+              onFinish={({ cpm, accuracy }) => {
+                const res = recordArticleRun(bests, { cpm, accuracy, date: localDate() });
+                if (res.isNewBest) {
+                  setBests(res.bests);
+                  if (soundOn) playFanfareSound();
+                }
               }}
               onActiveChange={setArticleActive}
               onOpenSettings={() => undefined}
@@ -2585,6 +2786,11 @@ export default function App(): JSX.Element {
                 <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
                   60 秒限時，練教育部字頻前 {diff} 字。結束會看得分、正確率和每分鐘字數。
                 </p>
+                {curTimedBest ? (
+                  <div className="timed-best-badge" data-testid="timed-best-badge">
+                    🏆 個人最佳（前 {diff} 字）：{curTimedBest.score} 字／分（正確率 {pct(curTimedBest.score, curTimedBest.tried)}）
+                  </div>
+                ) : null}
                 <Action label="開始挑戰" kbd="Enter" primary onClick={startTimed} />
               </div>
             ) : null}
@@ -2619,7 +2825,11 @@ export default function App(): JSX.Element {
                 <input
                   ref={inputRef}
                   value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (soundOn && next.length > typed.length) playKeySound();
+                    setTyped(next);
+                  }}
                   aria-label="限時挑戰字碼"
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -2648,11 +2858,43 @@ export default function App(): JSX.Element {
               </div>
             ) : null}
             {phase === "over" ? (
-              <div className="stage-center">
-                <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>時間到！</h2>
+              <div className="stage-center timed-result-card" data-testid="timed-result">
+                <div className="timed-result-head">
+                  {timedRunSummary?.isNewBest ? (
+                    <span className="timed-new-best-badge" data-testid="timed-new-best">
+                      🏆 破個人紀錄！
+                    </span>
+                  ) : null}
+                  <h2 style={{ ...theme.font.heading2, margin: 0, fontWeight: theme.weight.semibold }}>時間到！</h2>
+                </div>
                 <p style={{ ...theme.font.body1, margin: 0 }}>
                   得分 {tOk} ，正確率 {pct(tOk, tTried)} ，{tOk} 字／分。
                 </p>
+                <div className="timed-result-grid">
+                  <div className="timed-result-stat">
+                    <span className="timed-result-label">得分</span>
+                    <span className="timed-result-val">{tOk} 字/分</span>
+                  </div>
+                  <div className="timed-result-stat">
+                    <span className="timed-result-label">正確率</span>
+                    <span className="timed-result-val">{pct(tOk, tTried)}</span>
+                  </div>
+                  <div className="timed-result-stat">
+                    <span className="timed-result-label">個人最佳</span>
+                    <span className="timed-result-val">
+                      {curTimedBest ? curTimedBest.score + " 字/分" : "—"}
+                    </span>
+                  </div>
+                </div>
+                {bests.timedRecent.length > 0 ? (
+                  <div className="timed-recent-list">
+                    {bests.timedRecent.slice(0, 5).map((r, i) => (
+                      <span key={r.date + "-" + i} className="timed-recent-chip">
+                        {r.date.slice(5)} · 前{r.diff} · {r.score} 字/分
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <Action label="再來一次" kbd="Enter" primary onClick={startTimed} />
               </div>
             ) : null}
@@ -2807,6 +3049,7 @@ export default function App(): JSX.Element {
           </button>
         </footer>
       </div>
+      {comboToastEl}
       {shortcutsOpen ? <ShortcutsDialog onClose={() => setShortcutsOpen(false)} /> : null}
     </div>
   );

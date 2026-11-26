@@ -6,8 +6,10 @@ import {
   type BackupFile,
   type BackupSettings,
   type DrillMode,
+  type HeatmapCell,
   type HistoryStore,
   type ImportMode,
+  type PersonalBests,
   type SavedStats,
   DRILL_MODES,
   MODE_LABEL,
@@ -20,14 +22,17 @@ import {
   formatPct,
   formatSecPerItem,
   formatSpeed,
+  heatmapWeeks,
   localDate,
   makeBackup,
   oversizedBackupMessage,
   parseBackup,
+  periodDelta,
   recentDays,
   rangeTotals,
   seriesFor,
   shareBackupFile,
+  topWeakItems,
   dayTotals,
 } from "./historyLogic";
 
@@ -49,6 +54,8 @@ export default function HistoryMode(props: {
   history: HistoryStore;
   stats: SavedStats;
   settings: BackupSettings;
+  bests?: PersonalBests;
+  onStartWeakReview?: () => void;
   onOpenSettings: () => void;
   onImport: (data: BackupFile, mode: ImportMode) => void;
   mobileModeStrip?: ReactNode;
@@ -61,16 +68,23 @@ export default function HistoryMode(props: {
   const [pending, setPending] = useState<BackupFile | null>(null);
   const [msg, setMsg] = useState<string>("");
   const [err, setErr] = useState<string>("");
+  const [selectedDay, setSelectedDay] = useState<HeatmapCell | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const today = localDate();
 
   const rows = useMemo(() => seriesFor(history, today, range, filter), [history, today, range, filter]);
   const totals = useMemo(() => rangeTotals(history, today, range, filter), [history, today, range, filter]);
+  const delta = useMemo(() => periodDelta(history, today, range, filter), [history, today, range, filter]);
+  const heatCols = useMemo(() => heatmapWeeks(history, today, 12), [history, today]);
+  const weakRank = useMemo(
+    () => topWeakItems(props.stats.missChars, props.stats.missRoots, 20),
+    [props.stats.missChars, props.stats.missRoots],
+  );
   const tableDays = useMemo(() => recentDays(history, 30), [history]);
   const canShare = useMemo(() => canShareBackupFiles(), []);
 
   const backup = (): BackupFile =>
-    makeBackup({ stats: props.stats, history: props.history, settings: props.settings });
+    makeBackup({ stats: props.stats, history: props.history, settings: props.settings, bests: props.bests });
 
   function doExport(): void {
     setErr("");
@@ -170,12 +184,38 @@ export default function HistoryMode(props: {
   const summary = (
     <div className="history-summary" data-testid="history-summary">
       {[
-        { label: "題數", value: String(totals.tried) },
-        { label: "正確率", value: formatPct(totals) },
-        { label: "練習時間", value: totals.ms > 0 ? formatDuration(totals.ms) : "—" },
+        {
+          label: "題數",
+          value: String(totals.tried),
+          delta:
+            delta.triedDiff != null
+              ? {
+                  text: "比前 " + range + " 天 " + (delta.triedDiff >= 0 ? "+" : "") + delta.triedDiff,
+                  kind: delta.triedDiff > 0 ? "up" : delta.triedDiff < 0 ? "down" : "flat",
+                }
+              : null,
+        },
+        {
+          label: "正確率",
+          value: formatPct(totals),
+          delta:
+            delta.accDiffPct != null
+              ? {
+                  text:
+                    delta.accDiffPct > 0
+                      ? "↑" + delta.accDiffPct + "%"
+                      : delta.accDiffPct < 0
+                        ? "↓" + Math.abs(delta.accDiffPct) + "%"
+                        : "持平",
+                  kind: delta.accDiffPct > 0 ? "up" : delta.accDiffPct < 0 ? "down" : "flat",
+                }
+              : null,
+        },
+        { label: "練習時間", value: totals.ms > 0 ? formatDuration(totals.ms) : "—", delta: null },
         {
           label: filter === "article" ? "速度" : "平均速度",
           value: formatSpeed(totals, filter),
+          delta: null,
         },
       ].map((s) => (
         <div key={s.label} className="history-stat">
@@ -183,8 +223,166 @@ export default function HistoryMode(props: {
           <div style={{ ...theme.font.heading3, fontWeight: theme.weight.semibold, marginTop: 2, overflowWrap: "anywhere" }}>
             {s.value}
           </div>
+          {s.delta ? (
+            <div className={"history-delta is-" + s.delta.kind} data-testid={"history-delta-" + s.label}>
+              {s.delta.text}
+            </div>
+          ) : null}
         </div>
       ))}
+    </div>
+  );
+
+  const bestTimedList = useMemo(() => {
+    if (!props.bests) return [];
+    return Object.entries(props.bests.timedBestByDiff)
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([, rec]) => rec);
+  }, [props.bests]);
+
+  const bestsStrip =
+    bestTimedList.length > 0 || props.bests?.articleBestCpm ? (
+      <div className="history-bests-strip" data-testid="history-bests">
+        <span className="history-bests-label">🏆 個人最佳</span>
+        {bestTimedList.map((rec) => (
+          <span key={rec.diff} className="history-best-pill">
+            限時前 {rec.diff} 字：{rec.score} 字/分
+          </span>
+        ))}
+        {props.bests?.articleBestCpm ? (
+          <span className="history-best-pill">
+            文章最快：{props.bests.articleBestCpm.cpm} 字/分（{props.bests.articleBestCpm.accuracy}%）
+          </span>
+        ) : null}
+      </div>
+    ) : null;
+
+  const heatmapBlock = (
+    <div className="history-heatmap-card" data-testid="history-heatmap">
+      <div className="history-heatmap-head">
+        <span style={{ ...theme.font.caption, color: theme.text.secondary, fontWeight: theme.weight.semibold }}>
+          近 12 週練習日曆
+        </span>
+        <div className="history-heatmap-legend" aria-hidden="true">
+          <span>少</span>
+          {([0, 1, 2, 3, 4] as const).map((lv) => (
+            <span key={lv} className={"hm-cell is-lv" + lv} />
+          ))}
+          <span>多</span>
+        </div>
+      </div>
+      <div className="hm-scroll">
+        <div className="hm-wrap">
+          <div className="hm-months">
+            {heatCols.map((col, idx) => {
+              const firstVisible = col.find((c) => !c.future) ?? col[0];
+              const m = Number(firstVisible.date.slice(5, 7));
+              const prevCol = idx > 0 ? heatCols[idx - 1] : null;
+              const prevFirst = prevCol ? prevCol.find((c) => !c.future) ?? prevCol[0] : null;
+              const prevM = prevFirst ? Number(prevFirst.date.slice(5, 7)) : -1;
+              return (
+                <span key={col[0].date} className="hm-month-label">
+                  {idx === 0 || m !== prevM ? m + "月" : ""}
+                </span>
+              );
+            })}
+          </div>
+          <div className="hm-body">
+            <div className="hm-dow" aria-hidden="true">
+              <span />
+              <span>一</span>
+              <span />
+              <span>三</span>
+              <span />
+              <span>五</span>
+              <span />
+            </div>
+            <div className="hm-grid" role="grid" aria-label="近 12 週練習日曆">
+              {heatCols.map((col) => (
+                <div key={col[0].date} className="hm-col">
+                  {col.map((cell) => {
+                    if (cell.future) {
+                      return <span key={cell.date} className="hm-cell is-future" aria-hidden="true" />;
+                    }
+                    const isSel = selectedDay?.date === cell.date;
+                    const acc = cell.tried > 0 ? Math.round((cell.ok / cell.tried) * 100) + "%" : "—";
+                    const tip = cell.date + "：" + cell.tried + " 題" + (cell.tried > 0 ? "（正確率 " + acc + "）" : "");
+                    return (
+                      <button
+                        key={cell.date}
+                        type="button"
+                        data-date={cell.date}
+                        data-level={cell.level}
+                        title={tip}
+                        aria-label={tip}
+                        aria-pressed={isSel}
+                        className={"hm-cell is-lv" + cell.level + (isSel ? " is-selected" : "")}
+                        onClick={() => setSelectedDay((prev) => (prev?.date === cell.date ? null : cell))}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="history-heatmap-foot" data-testid="history-heatmap-detail">
+        {selectedDay
+          ? selectedDay.date +
+            "：" +
+            selectedDay.tried +
+            " 題" +
+            (selectedDay.tried > 0
+              ? " · 答對 " + selectedDay.ok + "（" + Math.round((selectedDay.ok / selectedDay.tried) * 100) + "%）"
+              : "（當天沒有練習）")
+          : "點選任一格可查看當天練習題數與正確率"}
+      </div>
+    </div>
+  );
+
+  const maxWeak = weakRank.length > 0 ? weakRank[0].count : 1;
+  const weakRankBlock = (
+    <div className="history-weak-card" data-testid="history-weak-rank">
+      <div className="history-weak-head">
+        <h3 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>
+          弱點字／字根排行{weakRank.length > 0 ? " Top " + weakRank.length : ""}
+        </h3>
+        {weakRank.length > 0 && props.onStartWeakReview ? (
+          <button
+            type="button"
+            className="ui-btn ui-btn-primary"
+            data-testid="history-weak-cta"
+            style={{ minHeight: 34, padding: "4px 12px", fontSize: 13 }}
+            onClick={props.onStartWeakReview}
+          >
+            去複習弱點 →
+          </button>
+        ) : null}
+      </div>
+      {weakRank.length === 0 ? (
+        <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: "6px 0 0" }}>
+          目前沒有累積錯字，繼續保持！
+        </p>
+      ) : (
+        <div className="history-weak-grid">
+          {weakRank.map((item, idx) => (
+            <div key={item.key} className="history-weak-item" data-rank={idx + 1}>
+              <div className="history-weak-top">
+                <span className="history-weak-glyph">{item.glyph}</span>
+                {item.sub ? <span className="history-weak-sub">{item.sub}</span> : null}
+                <span className="history-weak-count">×{item.count}</span>
+              </div>
+              <div className="history-weak-bar-track" aria-hidden="true">
+                <div
+                  className="history-weak-bar-fill"
+                  style={{ width: Math.max(12, Math.round((item.count / maxWeak) * 100)) + "%" }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -342,8 +540,11 @@ export default function HistoryMode(props: {
   const body = (
     <div className="history-wrap" data-testid="history-root">
       {controls}
+      {bestsStrip}
       {summary}
+      {heatmapBlock}
       {charts}
+      {weakRankBlock}
       {table}
       {backupBlock}
     </div>
