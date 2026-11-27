@@ -8,6 +8,7 @@ import type { Variants } from "./lookupLogic";
 import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
 import { KeycapBreakdown } from "./KeycapBreakdown";
+import { useIsTouch } from "./useIsMobile";
 
 type Status = "loading" | "error" | "ready" | "done";
 type Mark = "ok" | "bad" | "skip";
@@ -89,6 +90,7 @@ export default function ArticleMode(props: {
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
+  const isTouch = useIsTouch();
   const [status, setStatus] = useState<Status>("loading");
   const [errMsg, setErrMsg] = useState<string>("");
   const [art, setArt] = useState<Article | null>(null);
@@ -103,6 +105,7 @@ export default function ArticleMode(props: {
   const [vars, setVars] = useState<Variants | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const curRef = useRef<HTMLSpanElement | null>(null);
+  const badFeedbackRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<Table | null>(null);
   const reqId = useRef(0);
   const lastMarkAt = useRef<number | null>(null);
@@ -414,10 +417,15 @@ export default function ArticleMode(props: {
     </p>
   ) : null;
 
+  useEffect(() => {
+    if (!isMobile || !bad) return;
+    badFeedbackRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [isMobile, bad, idx]);
+
   const curMsg =
     cur && cur.k ? (
       bad ? (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div ref={badFeedbackRef} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
           <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold, margin: 0 }}>
             不對。「{cur.c}」的字碼是 {fmt(cur.k)}
             {cur.a && cur.a.length ? "（要選字：" + fmt(cur.a) + "）" : ""}
@@ -428,7 +436,7 @@ export default function ArticleMode(props: {
                 .split("")
                 .map((ch) => up(ch) + "　" + (props.reps[ch] ?? ""))
                 .join("；")}
-              。按{isMobile ? "「下一字」" : "空白鍵或 Enter"}繼續。
+              。按{isMobile && isTouch ? "「下一字」" : "空白鍵或 Enter"}繼續。
             </span>
           </p>
           <KeycapBreakdown
@@ -576,7 +584,7 @@ export default function ArticleMode(props: {
       </header>
     );
     const stage = (
-      <div className="mobile-q article-q">
+      <div className={"mobile-q article-q" + (bad ? " is-bad" : "")}>
         {loadingEl}
         {errorEl}
         {status === "ready" || status === "done" ? titleRow : null}
@@ -592,7 +600,7 @@ export default function ArticleMode(props: {
               style={{ borderColor: bad ? theme.text.danger : theme.border.strong }}
               data-testid="typed-display"
             >
-              {typed ? up(typed) : "點鍵盤輸入"}
+              {typed ? up(typed) : isTouch ? "點鍵盤輸入" : "直接打字輸入"}
             </div>
           </div>
         ) : null}
@@ -607,6 +615,7 @@ export default function ArticleMode(props: {
           theme={theme}
           reps={props.reps}
           showRoots={hintOn || bad}
+          collapsible={!isTouch}
           disabled={bad}
           submitLabel={bad ? "下一字" : "送出"}
           submitDisabled={!bad && typed.trim() === ""}

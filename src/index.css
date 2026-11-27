@@ -1546,7 +1546,7 @@ html.mobile-practice #root {
 }
 
 .mobile-glyph {
-  font-size: clamp(54px, 16vw, 84px);
+  font-size: clamp(44px, min(14vw, 11dvh), 80px);
   line-height: 1;
   font-weight: 600;
   padding: 10px 22px;
@@ -1832,10 +1832,56 @@ html.mobile-practice #root {
 
 .os-action:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 
-@media (max-height: 520px) {
-  .os-key, .os-key.has-roots { height: 34px; }
+.os-kb-toggle {
+  flex: 0.85 1 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.os-kb-toggle.is-on {
+  border-color: var(--brand-primary);
+  background: var(--fill-primary-soft);
+  color: var(--text-accent);
+}
+
+@media (max-height: 720px) {
+  .mobile-header { padding: 4px 12px 2px; min-height: 40px; }
+  .mobile-header h1 { font-size: 16px; }
+  .mobile-header-stats { font-size: 11px; }
+  .gear-btn { width: 38px; height: 38px; border-radius: 19px; }
+  .mobile-mode-strip { padding: 2px 12px 4px; }
+  .mobile-mode-chip { min-height: 28px; padding: 0 9px; font-size: 12px; }
+  .mobile-today-bar { padding: 1px 12px 4px; min-height: 22px; }
+  .mobile-stage { padding: 4px 12px 6px; }
+  .mobile-q { gap: 5px; }
+  .mobile-glyph { padding: 6px 16px; }
+  .mobile-typed { min-height: 40px; font-size: 19px; padding: 4px 10px; }
+  .mobile-msg { font-size: 13px; line-height: 1.38; }
+  .os-kb { gap: 5px; }
+  .os-key { height: 40px; }
+  .os-key.has-roots { height: 46px; }
+  .os-action { min-height: 42px; font-size: 14px; }
+  .keycap-breakdown.is-compact { margin-top: 4px; gap: 4px; }
+  .keycap-breakdown.is-compact .keycap-unit { min-width: 42px; max-width: 66px; gap: 2px; }
+  .keycap-breakdown.is-compact .keycap-cap { min-width: 32px; height: 30px; padding: 0 6px; }
+  .keycap-breakdown.is-compact .keycap-letter { font-size: 14px; }
+  .keycap-breakdown.is-compact .keycap-roots { font-size: 9px; line-height: 1.15; }
+}
+
+@media (max-height: 620px) {
+  .mobile-glyph { font-size: clamp(38px, 9.5dvh, 56px); padding: 5px 14px; }
+  .mobile-typed { min-height: 36px; font-size: 17px; }
+  .os-kb { gap: 4px; }
+  .os-key { height: 36px; }
+  .os-key.has-roots { height: 42px; }
+  .os-key-letter { font-size: 14px; }
   .os-action { min-height: 38px; font-size: 13px; }
-  .mobile-glyph { font-size: 48px; padding: 4px 12px; }
+}
+
+@media (max-height: 520px) {
+  .os-key, .os-key.has-roots { height: 32px; }
+  .os-action { min-height: 34px; font-size: 12px; }
+  .mobile-glyph { font-size: 40px; padding: 4px 12px; }
   .os-key-roots { display: none; }
 }
 
@@ -2124,7 +2170,7 @@ html.mobile-practice #root {
   font-size: 13px;
   font-weight: 700;
 }
-.article-q { margin: 0 auto; gap: 7px; }
+.article-q { margin: 0 auto; gap: 7px; max-width: 560px; }
 .article-cur-row { display: flex; align-items: center; gap: 12px; justify-content: center; width: 100%; }
 .article-cur-glyph {
   font-size: 40px;
@@ -2137,10 +2183,16 @@ html.mobile-practice #root {
   box-shadow: var(--shadow-sm);
 }
 .mobile-shell .article-passage { font-size: 18px; line-height: 1.75; max-height: 32dvh; padding: 8px 10px; }
+.mobile-shell .article-q.is-bad .article-passage { max-height: min(18dvh, 108px); }
 .mobile-shell .article-cur-row .mobile-typed { width: auto; flex: 1 1 auto; }
 @media (max-height: 620px) {
-  .mobile-shell .article-passage { max-height: 22dvh; font-size: 16px; }
-  .article-cur-glyph { font-size: 32px; }
+  .mobile-shell .article-passage { max-height: 22dvh; font-size: 15px; line-height: 1.65; padding: 6px 10px; }
+  .mobile-shell .article-q.is-bad .article-passage { max-height: min(15dvh, 88px); }
+  .article-cur-glyph { font-size: 28px; padding: 5px 9px; }
+}
+@media (max-height: 520px) {
+  .mobile-shell .article-passage { max-height: 18dvh; font-size: 14px; line-height: 1.55; }
+  .mobile-shell .article-q.is-bad .article-passage { max-height: 72px; }
 }
 
 /* 查碼 */

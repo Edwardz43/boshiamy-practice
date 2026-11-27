@@ -90,6 +90,7 @@ export function OnScreenKeyboard(props: {
   theme: GrokTheme;
   reps: Record<string, string>;
   showRoots: boolean;
+  collapsible?: boolean;
   disabled?: boolean;
   submitLabel: string;
   submitDisabled?: boolean;
@@ -101,24 +102,47 @@ export function OnScreenKeyboard(props: {
   onSubmit: () => void;
 }): JSX.Element {
   void props.theme;
+  const [expanded, setExpanded] = useState(false);
+  const showKeys = !props.collapsible || expanded;
+
   return (
-    <div className="os-kb" role="group" aria-label="字根鍵盤">
-      {ROWS.map((row, i) => (
-        <div key={i} className={"os-row os-row-" + i}>
-          {row.map((k) => (
-            <LetterKey
-              key={k}
-              letter={k}
-              roots={(props.reps[k] ?? "").replace(/\s+/g, "")}
-              showRoots={props.showRoots}
-              disabled={props.disabled}
-              onPress={props.onLetter}
-            />
-          ))}
-        </div>
-      ))}
+    <div
+      className={"os-kb" + (showKeys ? "" : " is-collapsed")}
+      role="group"
+      aria-label="字根鍵盤"
+      data-testid="os-kb"
+    >
+      {showKeys
+        ? ROWS.map((row, i) => (
+            <div key={i} className={"os-row os-row-" + i}>
+              {row.map((k) => (
+                <LetterKey
+                  key={k}
+                  letter={k}
+                  roots={(props.reps[k] ?? "").replace(/\s+/g, "")}
+                  showRoots={props.showRoots}
+                  disabled={props.disabled}
+                  onPress={props.onLetter}
+                />
+              ))}
+            </div>
+          ))
+        : null}
       <div className="os-actions">
-        <ActionKey label="刪除" onPress={props.onDelete} disabled={props.disabled} />
+        {props.collapsible ? (
+          <button
+            type="button"
+            className={"os-action os-kb-toggle" + (expanded ? " is-on" : "")}
+            data-testid="os-kb-toggle"
+            aria-expanded={expanded}
+            aria-label={expanded ? "收起虛擬鍵盤" : "顯示虛擬鍵盤"}
+            title={expanded ? "收起虛擬鍵盤" : "顯示虛擬鍵盤"}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? "⌨ 收起" : "⌨ 鍵盤"}
+          </button>
+        ) : null}
+        {showKeys ? <ActionKey label="刪除" onPress={props.onDelete} disabled={props.disabled} /> : null}
         <ActionKey label="提示" onPress={props.onHint} disabled={props.hintDisabled} />
         <ActionKey label="跳過" onPress={props.onSkip} />
         <ActionKey

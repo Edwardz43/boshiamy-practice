@@ -9,7 +9,7 @@ import {
   type JSX,
 } from "react";
 import { isColorMode, isThemeId, useGrokTheme, useThemeControl } from "./theme";
-import { useIsMobile } from "./useIsMobile";
+import { useIsMobile, useIsTouch } from "./useIsMobile";
 import { OnScreenKeyboard } from "./OnScreenKeyboard";
 import { BottomSheet, IconGearButton, MobileModeStrip, MobileShell, MobileTodayBar, ToggleRow } from "./MobileChrome";
 import { BrandMark, DesktopThemeBar, MobileThemeSection, ModeIcon, type NavMode } from "./ThemePicker";
@@ -687,6 +687,7 @@ export default function App(): JSX.Element {
   const [showKb, setShowKb] = useState<boolean>(false);
   const [showShortTable, setShowShortTable] = useState<boolean>(false);
   const isMobile = useIsMobile();
+  const isTouch = useIsTouch();
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [autoNext, setAutoNext] = useState<boolean>(() =>
     loadAutoNext(false),
@@ -1533,7 +1534,7 @@ export default function App(): JSX.Element {
         aria-label={mode === "roots" ? "字根對應按鍵" : "嘸蝦米字碼"}
         data-testid="typed-display"
       >
-        {typed ? up(typed) : "點下面鍵盤輸入"}
+        {typed ? up(typed) : isTouch ? "點下面鍵盤輸入" : "直接打字輸入"}
       </div>
     );
 
@@ -2235,6 +2236,7 @@ export default function App(): JSX.Element {
           theme={theme}
           reps={KEY_REPS}
           showRoots={showRootsOnKeys}
+          collapsible={!isTouch}
           disabled={verdict !== "idle"}
           submitLabel={mode === "timed" && phase === "run" && verdict !== "idle" ? "送出" : submitLabel}
           submitDisabled={mode === "timed" && phase === "run" ? verdict !== "idle" || typed.trim() === "" : submitDisabled}
