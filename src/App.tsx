@@ -60,9 +60,18 @@ import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
 import { KeycapBreakdown } from "./KeycapBreakdown";
 import { createBag, drawFromBag, shuffle, type DrawBag } from "./drawLogic";
+import {
+  addWordbookChars,
+  loadWordbookFromStorage,
+  removeWordbookChar,
+  saveWordbookToStorage,
+  toggleWordbookChar,
+} from "./wordbookLogic";
 
 // 文章練習 is split into its own chunk; its code table (liu-table.json) loads only when the mode opens.
 const ArticleMode = lazy(() => import("./ArticleMode"));
+// 詞彙連打 shares the same code table; also its own chunk, loaded on first open.
+const PhraseMode = lazy(() => import("./PhraseMode"));
 // 查碼 shares the same code table; also its own chunk, loaded on first open.
 const LookupMode = lazy(() => import("./LookupMode"));
 // 紀錄（每日歷程、圖表、匯出匯入）is its own chunk, loaded on first open.
@@ -143,7 +152,7 @@ type RootItem = {
   memo: string;
 };
 
-type Mode = "roots" | "chars" | "short" | "timed" | "article" | "lookup" | "history";
+type Mode = "roots" | "chars" | "short" | "phrases" | "timed" | "article" | "lookup" | "history";
 type RootDir = "forward" | "reverse";
 type Diff = 100 | 300 | 600 | 1000;
 const DIFFS: { v: Diff; key: string; code: string }[] = [
@@ -492,6 +501,7 @@ function ShortcutsDialog(props: { onClose: () => void }): JSX.Element {
         { keys: ["⌥1"], label: "字根練習" },
         { keys: ["⌥7"], label: "簡碼練習" },
         { keys: ["⌥2"], label: "常用字" },
+        { keys: ["⌥8"], label: "詞彙連打" },
         { keys: ["⌥4"], label: "文章練習" },
         { keys: ["⌥3"], label: "限時挑戰" },
         { keys: ["⌥5"], label: "查碼" },
@@ -742,6 +752,16 @@ export default function App(): JSX.Element {
       }
     }),
   );
+  const [wordbook, setWordbook] = useState<string[]>(() =>
+    loadWordbookFromStorage((k) => {
+      try {
+        return localStorage.getItem(k);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const [wordbookPracticeTick, setWordbookPracticeTick] = useState<number>(0);
   const [timedRunSummary, setTimedRunSummary] = useState<{ isNewBest: boolean; prevBest: TimedRecord | null } | null>(
     null,
   );
@@ -872,7 +892,7 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     if (isMobile || themeOpen || shortcutsOpen) return;
-    if (mode === "article" || mode === "lookup" || mode === "history") return;
+    if (mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history") return;
     if (mode === "timed" && phase !== "run") return;
     const t = window.setTimeout(() => focusInput(), 40);
     return () => window.clearTimeout(t);
@@ -912,6 +932,14 @@ export default function App(): JSX.Element {
       /* ignore quota / private mode */
     }
   }, [bests]);
+
+  useEffect(() => {
+    try {
+      saveWordbookToStorage((k, v) => localStorage.setItem(k, v), wordbook);
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [wordbook]);
 
   useEffect(() => {
     return () => {
@@ -985,6 +1013,7 @@ export default function App(): JSX.Element {
         history,
         settings: { autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn },
         bests,
+        wordbook,
       },
       data,
       how,
@@ -996,6 +1025,7 @@ export default function App(): JSX.Element {
     setMissRoots(next.stats.missRoots);
     setHistory(next.history);
     setBests(next.bests);
+    setWordbook(next.wordbook);
     if (how === "replace") {
       setAutoNext(next.settings.autoNext);
       if (isThemeId(next.settings.theme)) setThemeId(next.settings.theme);
@@ -1242,7 +1272,8 @@ export default function App(): JSX.Element {
         else if (c === "Digit5") switchMode("lookup");
         else if (c === "Digit6") switchMode("history");
         else if (c === "Digit7") switchMode("short");
-        else if ((mode === "article" || mode === "lookup" || mode === "history") && c !== "KeyK") hit = false;
+        else if (c === "Digit8") switchMode("phrases");
+        else if ((mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history") && c !== "KeyK") hit = false;
         else if (c === "KeyQ") {
           if (mode === "roots") setRootDir("forward");
           else if (mode === "short") setShortTier("one");
@@ -1278,8 +1309,8 @@ export default function App(): JSX.Element {
         return;
       }
       if (!isMobile && shortcutsOpen) return;
-      // 文章練習 handles its own keys (ArticleMode); 查碼 is plain text entry (LookupMode).
-      if (mode === "article" || mode === "lookup" || mode === "history") return;
+      // 文章練習 & 詞彙連打 handle their own keys; 查碼 is plain text entry (LookupMode).
+      if (mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history") return;
       const k = ev.key;
       if (isMobile) {
         const typing =
@@ -1368,11 +1399,11 @@ export default function App(): JSX.Element {
 
   const activeKeys = useMemo(() => {
     const s = new Set<string>();
-    const rawTyped = mode === "article" ? articleActive.typed : typed;
+    const rawTyped = mode === "article" || mode === "phrases" ? articleActive.typed : typed;
     for (const ch of rawTyped.toLowerCase()) {
       if (ch >= "a" && ch <= "z") s.add(ch);
     }
-    if (mode === "article") {
+    if (mode === "article" || mode === "phrases") {
       if (articleActive.bad) {
         for (const ch of articleActive.code) s.add(ch);
       } else if (articleActive.hintOn && articleActive.code[0]) {
@@ -1404,7 +1435,7 @@ export default function App(): JSX.Element {
     const map = new Map<string, number[]>();
     let kind: "hint" | "ok" | "bad" = "hint";
     let seq = "";
-    if (mode === "article") {
+    if (mode === "article" || mode === "phrases") {
       if (articleActive.bad) {
         seq = articleActive.code;
         kind = "bad";
@@ -1947,7 +1978,7 @@ export default function App(): JSX.Element {
         </div>
         )}
         <div className="settings-block">
-          {mode === "article" || mode === "lookup" || mode === "history" ? null : (
+          {mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history" ? null : (
           <button
             type="button"
             className={"settings-chip" + (review ? " is-on" : "")}
@@ -2116,6 +2147,7 @@ export default function App(): JSX.Element {
             stats={{ ok, tried, streak, missChars, missRoots }}
             settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
             bests={bests}
+            wordbook={wordbook}
             onStartWeakReview={startWeakReview}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
@@ -2140,6 +2172,57 @@ export default function App(): JSX.Element {
             theme={theme}
             isMobile
             reps={KEY_REPS}
+            wordbook={wordbook}
+            autoNext={autoNext}
+            soundOn={soundOn}
+            sheetOpen={showSettings || showKb}
+            startPracticeTick={wordbookPracticeTick}
+            onToggleWordbook={(ch) => setWordbook((w) => toggleWordbookChar(w, ch).next)}
+            onAddWordbookMany={(chars) => setWordbook((w) => addWordbookChars(w, chars).next)}
+            onRemoveWordbook={(ch) => setWordbook((w) => removeWordbookChar(w, ch))}
+            onClearWordbook={() => setWordbook([])}
+            onWordbookAttempt={({ correct, ms }) => {
+              setHistory((h) => recordAttempt(h, "chars", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+              if (soundOn) {
+                if (correct) playOkSound();
+                else playBadSound();
+              }
+            }}
+            onOpenSettings={() => setShowSettings(true)}
+            mobileModeStrip={mobileModeStrip}
+            mobileTodayBar={mobileTodayBar}
+            mobileSheets={
+              <>
+                {settingsSheet}
+                {chartSheet}
+                {shortTableSheet}
+              </>
+            }
+          />
+        </Suspense>
+      );
+    }
+
+    if (mode === "phrases") {
+      return (
+        <Suspense fallback={<div className="mobile-shell" style={{ background: theme.bg.base }} />}>
+          <PhraseMode
+            theme={theme}
+            isMobile
+            reps={KEY_REPS}
+            sheetOpen={showSettings || showKb}
+            soundOn={soundOn}
+            onMiss={(ch) => {
+              if (CHAR_SET.has(ch)) markMissChar(ch);
+            }}
+            onAttempt={({ correct, ms }) => {
+              setHistory((h) => recordAttempt(h, "phrases", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+              if (soundOn) {
+                if (correct) playOkSound();
+                else playBadSound();
+              }
+            }}
+            onActiveChange={setArticleActive}
             onOpenSettings={() => setShowSettings(true)}
             mobileModeStrip={mobileModeStrip}
             mobileTodayBar={mobileTodayBar}
@@ -2326,6 +2409,7 @@ export default function App(): JSX.Element {
             { value: "roots", label: "字根練習", kbd: "⌥1", group: "practice" },
             { value: "short", label: "簡碼練習", kbd: "⌥7", group: "practice" },
             { value: "chars", label: "常用字", kbd: "⌥2", group: "practice" },
+            { value: "phrases", label: "詞彙連打", kbd: "⌥8", group: "practice" },
             { value: "article", label: "文章練習", kbd: "⌥4", group: "practice" },
             { value: "timed", label: "限時挑戰", kbd: "⌥3", group: "practice" },
             { value: "lookup", label: "查碼", kbd: "⌥5", group: "tools" },
@@ -2335,7 +2419,7 @@ export default function App(): JSX.Element {
 
         <div className="sub-toolbar">
           <div className="sub-toolbar-group">
-            {mode === "article" || mode === "lookup" || mode === "history" ? null : mode === "short" ? (
+            {mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history" ? null : mode === "short" ? (
               <>
                 {SHORT_TIERS.map((t) => (
                   <Pill
@@ -2367,7 +2451,7 @@ export default function App(): JSX.Element {
                 <Pill label="看按鍵認字根" kbd="⌥W" on={rootDir === "reverse"} onClick={() => setRootDir("reverse")} />
               </>
             )}
-            {mode === "article" || mode === "lookup" || mode === "history" ? null : (
+            {mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history" ? null : (
               <Pill
                 label="複習錯字"
                 kbd="⌥R"
@@ -2729,7 +2813,52 @@ export default function App(): JSX.Element {
 
         {mode === "lookup" ? (
           <Suspense fallback={<section className="stage-card">載入中…</section>}>
-            <LookupMode theme={theme} isMobile={false} reps={KEY_REPS} onOpenSettings={() => undefined} />
+            <LookupMode
+              theme={theme}
+              isMobile={false}
+              reps={KEY_REPS}
+              wordbook={wordbook}
+              autoNext={autoNext}
+              soundOn={soundOn}
+              sheetOpen={themeOpen || shortcutsOpen}
+              startPracticeTick={wordbookPracticeTick}
+              onToggleWordbook={(ch) => setWordbook((w) => toggleWordbookChar(w, ch).next)}
+              onAddWordbookMany={(chars) => setWordbook((w) => addWordbookChars(w, chars).next)}
+              onRemoveWordbook={(ch) => setWordbook((w) => removeWordbookChar(w, ch))}
+              onClearWordbook={() => setWordbook([])}
+              onWordbookAttempt={({ correct, ms }) => {
+                setHistory((h) => recordAttempt(h, "chars", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+                if (soundOn) {
+                  if (correct) playOkSound();
+                  else playBadSound();
+                }
+              }}
+              onOpenSettings={() => undefined}
+            />
+          </Suspense>
+        ) : null}
+
+        {mode === "phrases" ? (
+          <Suspense fallback={<section className="stage-card">載入中…</section>}>
+            <PhraseMode
+              theme={theme}
+              isMobile={false}
+              reps={KEY_REPS}
+              sheetOpen={themeOpen || shortcutsOpen}
+              soundOn={soundOn}
+              onMiss={(ch) => {
+                if (CHAR_SET.has(ch)) markMissChar(ch);
+              }}
+              onAttempt={({ correct, ms }) => {
+                setHistory((h) => recordAttempt(h, "phrases", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
+                if (soundOn) {
+                  if (correct) playOkSound();
+                  else playBadSound();
+                }
+              }}
+              onActiveChange={setArticleActive}
+              onOpenSettings={() => undefined}
+            />
           </Suspense>
         ) : null}
 
@@ -2742,6 +2871,7 @@ export default function App(): JSX.Element {
               stats={{ ok, tried, streak, missChars, missRoots }}
               settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
               bests={bests}
+              wordbook={wordbook}
               onStartWeakReview={startWeakReview}
               onOpenSettings={() => undefined}
               onImport={importBackup}
@@ -2962,6 +3092,20 @@ export default function App(): JSX.Element {
                   {todayInfo.done ? "今日目標已達成，手感保持得很好！" : "目前沒有積累弱點字，繼續保持。"}
                 </p>
               )}
+              {wordbook.length > 0 ? (
+                <button
+                  type="button"
+                  className="today-review-cta"
+                  data-testid="today-wordbook-cta"
+                  onClick={() => {
+                    switchMode("lookup");
+                    setWordbookPracticeTick((t) => t + 1);
+                  }}
+                >
+                  <span>★ 複習生字本（{wordbook.length} 字）</span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              ) : null}
             </section>
             <section className="stage-card side-card">
               <div className="side-card-head">

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, typ
 import type { GrokTheme } from "./theme";
 import { IconGearButton, MobileShell } from "./MobileChrome";
 import { BrandMark } from "./ThemePicker";
+import { loadTable, loadVariants } from "./tableLoader";
+import { WordbookPractice } from "./WordbookPractice";
 import {
   buildReverse,
   detectMode,
@@ -17,39 +19,6 @@ import {
 
 type Status = "loading" | "error" | "ready";
 
-let tablePromise: Promise<Table> | null = null;
-function loadTable(): Promise<Table> {
-  if (!tablePromise) {
-    tablePromise = fetch("./liu-table.json")
-      .then((r) => {
-        if (!r.ok) throw new Error("table " + r.status);
-        return r.json() as Promise<Table>;
-      })
-      .catch((e) => {
-        tablePromise = null;
-        throw e;
-      });
-  }
-  return tablePromise;
-}
-
-let variantsPromise: Promise<Variants | null> | null = null;
-// 繁簡對照 is a nice-to-have: if it fails to load, 查碼 still works without it.
-function loadVariants(): Promise<Variants | null> {
-  if (!variantsPromise) {
-    variantsPromise = fetch("./opencc-chars.json")
-      .then((r) => {
-        if (!r.ok) throw new Error("variants " + r.status);
-        return r.json() as Promise<Variants>;
-      })
-      .catch(() => {
-        variantsPromise = null;
-        return null;
-      });
-  }
-  return variantsPromise;
-}
-
 function up(s: string): string {
   return s.toUpperCase();
 }
@@ -58,12 +27,24 @@ export default function LookupMode(props: {
   theme: GrokTheme;
   isMobile: boolean;
   reps: Record<string, string>;
+  wordbook?: string[];
+  autoNext?: boolean;
+  soundOn?: boolean;
+  sheetOpen?: boolean;
+  startPracticeTick?: number;
+  onToggleWordbook?: (ch: string) => void;
+  onAddWordbookMany?: (chars: string[]) => void;
+  onRemoveWordbook?: (ch: string) => void;
+  onClearWordbook?: () => void;
+  onWordbookAttempt?: (info: { correct: boolean; ms: number }) => void;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
   mobileTodayBar?: ReactNode;
   mobileSheets?: ReactNode;
 }): JSX.Element {
   const { theme, isMobile } = props;
+  const wordbook = props.wordbook ?? [];
+  const wordbookSet = useMemo(() => new Set(wordbook), [wordbook]);
   const [status, setStatus] = useState<Status>("loading");
   const [table, setTable] = useState<Table | null>(null);
   const [vars, setVars] = useState<Variants | null>(null);
@@ -72,9 +53,19 @@ export default function LookupMode(props: {
   const [query, setQuery] = useState<string>("");
   const [viewMode, setViewMode] = useState<"list" | "ruby">("list");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [practicing, setPracticing] = useState<boolean>(false);
   const copyTimer = useRef<number | null>(null);
   const composing = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastPracticeTick = useRef<number>(props.startPracticeTick ?? 0);
+
+  useEffect(() => {
+    const tick = props.startPracticeTick ?? 0;
+    if (tick > lastPracticeTick.current && wordbook.length > 0) {
+      lastPracticeTick.current = tick;
+      setPracticing(true);
+    }
+  }, [props.startPracticeTick, wordbook.length]);
 
   function copyCode(text: string, key: string): void {
     if (!text) return;
@@ -274,6 +265,21 @@ export default function LookupMode(props: {
                 Ruby 標註
               </button>
             </div>
+            {found > 1 && props.onAddWordbookMany ? (() => {
+              const foundChars = forward.results.filter((r) => r.found).map((r) => r.c);
+              const unsaved = foundChars.filter((c) => !wordbookSet.has(c));
+              return (
+                <button
+                  type="button"
+                  className="lookup-copy-btn"
+                  data-testid="lookup-star-all"
+                  disabled={unsaved.length === 0}
+                  onClick={() => props.onAddWordbookMany?.(unsaved)}
+                >
+                  {unsaved.length === 0 ? "★ 皆已收藏" : `☆ 全部加入生字本 (+${unsaved.length})`}
+                </button>
+              );
+            })() : null}
             {found > 0 ? (
               <button
                 type="button"
@@ -350,6 +356,22 @@ export default function LookupMode(props: {
                       >
                         {copiedKey === cKey ? "已複製 ✓" : "複製"}
                       </button>
+                      {props.onToggleWordbook ? (() => {
+                        const starred = wordbookSet.has(r.c);
+                        return (
+                          <button
+                            type="button"
+                            className={"lookup-star-btn" + (starred ? " is-starred" : "")}
+                            data-testid="lookup-star-btn"
+                            data-char={r.c}
+                            aria-pressed={starred}
+                            aria-label={(starred ? "移出生字本：" : "加入生字本：") + r.c}
+                            onClick={() => props.onToggleWordbook?.(r.c)}
+                          >
+                            {starred ? "★ 已收藏" : "☆ 生字本"}
+                          </button>
+                        );
+                      })() : null}
                       <span className="lookup-roots" style={{ color: theme.text.tertiary }}>
                         {r.codes[0].code
                           .split("")
@@ -416,6 +438,105 @@ export default function LookupMode(props: {
     );
   }
 
+  const wordbookPanel =
+    props.onToggleWordbook ? (
+      <div className="wordbook-panel" data-testid="wordbook-panel">
+        <div className="wordbook-panel-head">
+          <div className="wordbook-panel-title">
+            <span aria-hidden="true">★</span>
+            <span>我的生字本</span>
+            <span className="wordbook-count" data-testid="wordbook-count">
+              {wordbook.length} 字
+            </span>
+          </div>
+          <div className="wordbook-panel-actions">
+            {wordbook.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className="ui-btn ui-btn-primary wordbook-go-btn"
+                  data-testid="wordbook-practice-btn"
+                  disabled={!table}
+                  onClick={() => setPracticing(true)}
+                >
+                  開始複習生字本
+                </button>
+                {props.onClearWordbook ? (
+                  <button
+                    type="button"
+                    className="ui-btn ui-btn-ghost"
+                    data-testid="wordbook-clear-btn"
+                    style={{ minHeight: 32, padding: "4px 10px", fontSize: 12 }}
+                    onClick={() => {
+                      if (window.confirm("確定要清空生字本嗎？")) props.onClearWordbook?.();
+                    }}
+                  >
+                    清空
+                  </button>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </div>
+        {wordbook.length === 0 ? (
+          <p className="wordbook-empty" style={{ color: theme.text.tertiary, margin: 0 }}>
+            查完不熟的字後按「☆ 生字本」就能收進來，隨時開一輪專屬複習。
+          </p>
+        ) : (
+          <div className="wordbook-chips" data-testid="wordbook-chips">
+            {wordbook.map((ch) => (
+              <span key={ch} className="wordbook-chip" data-char={ch}>
+                <button
+                  type="button"
+                  className="wordbook-chip-char"
+                  title={"查看「" + ch + "」字碼"}
+                  onClick={() => {
+                    setValue(ch);
+                    setQuery(ch);
+                  }}
+                >
+                  {ch}
+                </button>
+                {props.onRemoveWordbook ? (
+                  <button
+                    type="button"
+                    className="wordbook-chip-del"
+                    aria-label={"移出生字本：" + ch}
+                    onClick={() => props.onRemoveWordbook?.(ch)}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  if (practicing && table) {
+    return (
+      <WordbookPractice
+        theme={theme}
+        isMobile={isMobile}
+        reps={props.reps}
+        table={table}
+        vars={vars}
+        wordbook={wordbook}
+        autoNext={props.autoNext ?? false}
+        soundOn={props.soundOn ?? false}
+        sheetOpen={props.sheetOpen}
+        onAttempt={props.onWordbookAttempt}
+        onRemoveWordbook={(ch) => props.onRemoveWordbook?.(ch)}
+        onBack={() => setPracticing(false)}
+        onOpenSettings={props.onOpenSettings}
+        mobileModeStrip={props.mobileModeStrip}
+        mobileTodayBar={props.mobileTodayBar}
+        mobileSheets={props.mobileSheets}
+      />
+    );
+  }
+
   const help = "輸入中文字：逐字列出字碼，標出最短碼。輸入英文字碼：反查對應的字。";
 
   if (isMobile) {
@@ -427,7 +548,7 @@ export default function LookupMode(props: {
             <h1 style={{ fontWeight: theme.weight.semibold }}>無蝦米練功房</h1>
           </div>
           <div className="mobile-header-stats">
-            查碼
+            查碼{wordbook.length > 0 ? ` · 生字本 ${wordbook.length} 字` : ""}
           </div>
         </div>
         <IconGearButton theme={theme} onClick={props.onOpenSettings} />
@@ -437,6 +558,7 @@ export default function LookupMode(props: {
       <div className="lookup-wrap" data-testid="lookup-mobile">
         {input}
         {body}
+        {wordbookPanel}
       </div>
     );
     const footer = (
@@ -516,6 +638,7 @@ export default function LookupMode(props: {
         <span style={{ ...theme.font.caption, color: theme.text.tertiary }}>{help}</span>
       </div>
       {body}
+      {wordbookPanel}
       <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
         字碼資料來自內建碼表，離線也能查。繁簡對照取自 OpenCC（Apache-2.0 授權）。「最短碼」是同一個字的多組碼裡最短的；「要選字」表示要從候選字裡再選。
       </p>

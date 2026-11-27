@@ -1,7 +1,7 @@
 import { useEffect, useRef, type JSX } from "react";
 import { THEME_LIST, useThemeControl, type ColorMode } from "./theme";
 
-export type NavMode = "roots" | "chars" | "short" | "timed" | "article" | "lookup" | "history";
+export type NavMode = "roots" | "chars" | "short" | "phrases" | "timed" | "article" | "lookup" | "history";
 
 export function BrandMark(props: { size?: number }): JSX.Element {
   const size = props.size ?? 34;
@@ -74,6 +74,14 @@ export function ModeIcon(props: { mode: NavMode }): JSX.Element {
       return (
         <svg {...common}>
           <path d="M13 2L4.5 13.5H12L11 22l8.5-11.5H12L13 2z" />
+        </svg>
+      );
+    case "phrases":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="8" height="14" rx="2" />
+          <rect x="13" y="5" width="8" height="14" rx="2" />
+          <path d="M6 10h2M6 14h2M16 10h2M16 14h2" />
         </svg>
       );
     case "timed":

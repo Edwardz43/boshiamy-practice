@@ -53,11 +53,11 @@ async function addCspListener(ctx) {
   const sw0 = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.ok(sw0 <= 0, "desktop ink light horizontal overflow: " + sw0);
 
-  // Verify 7 mode tabs sit on a single row at 1280px without line breaks inside tab text
+  // Verify 8 mode tabs sit on a single row at 1280px without line breaks inside tab text
   const tabRects = await p.$$eval(".mode-tab", (els) =>
     els.map((el) => ({ top: Math.round(el.getBoundingClientRect().top), h: Math.round(el.getBoundingClientRect().height) })),
   );
-  assert.equal(tabRects.length, 7);
+  assert.equal(tabRects.length, 8);
   const tops = new Set(tabRects.map((r) => r.top));
   assert.equal(tops.size, 1, "mode tabs wrapped to multiple rows at 1280px: " + JSON.stringify(tabRects));
   await p.screenshot({ path: path.join(OUT, "theme-ink-light.png"), fullPage: true });

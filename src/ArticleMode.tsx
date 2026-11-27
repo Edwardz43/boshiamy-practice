@@ -5,6 +5,7 @@ import { IconGearButton, MobileShell } from "./MobileChrome";
 import { BrandMark } from "./ThemePicker";
 import { WIKI_URL, pickArticle, type Article, type Table } from "./articleText";
 import type { Variants } from "./lookupLogic";
+import { loadTable, loadVariants } from "./tableLoader";
 import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
 import { KeycapBreakdown } from "./KeycapBreakdown";
@@ -12,39 +13,6 @@ import { useIsTouch } from "./useIsMobile";
 
 type Status = "loading" | "error" | "ready" | "done";
 type Mark = "ok" | "bad" | "skip";
-
-let tablePromise: Promise<Table> | null = null;
-function loadTable(): Promise<Table> {
-  if (!tablePromise) {
-    tablePromise = fetch("./liu-table.json")
-      .then((r) => {
-        if (!r.ok) throw new Error("table " + r.status);
-        return r.json() as Promise<Table>;
-      })
-      .catch((e) => {
-        tablePromise = null;
-        throw e;
-      });
-  }
-  return tablePromise;
-}
-
-let variantsPromise: Promise<Variants | null> | null = null;
-// 繁簡對照 is a nice-to-have: if it fails to load, 文章練習 still works without it.
-function loadVariants(): Promise<Variants | null> {
-  if (!variantsPromise) {
-    variantsPromise = fetch("./opencc-chars.json")
-      .then((r) => {
-        if (!r.ok) throw new Error("variants " + r.status);
-        return r.json() as Promise<Variants>;
-      })
-      .catch(() => {
-        variantsPromise = null;
-        return null;
-      });
-  }
-  return variantsPromise;
-}
 
 async function fetchArticle(table: Table): Promise<Article> {
   for (let attempt = 0; attempt < 4; attempt++) {

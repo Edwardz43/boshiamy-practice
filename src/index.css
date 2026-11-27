@@ -2913,3 +2913,232 @@ html.mobile-practice #root {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Wordbook (生字本) ---- */
+
+.lookup-star-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.lookup-star-btn:hover {
+  border-color: var(--brand-primary);
+  color: var(--text-primary);
+}
+.lookup-star-btn.is-starred {
+  background: var(--fill-accent-soft, rgba(245, 158, 11, 0.14));
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+}
+
+.wordbook-panel {
+  margin-top: 8px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle, var(--fill-secondary));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wordbook-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.wordbook-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wordbook-count {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.wordbook-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wordbook-go-btn {
+  min-height: 34px;
+  padding: 5px 14px;
+  font-size: 13px;
+}
+
+.wordbook-empty {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wordbook-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wordbook-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  overflow: hidden;
+}
+
+.wordbook-chip-char {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.wordbook-chip-char:hover {
+  color: var(--brand-primary);
+}
+
+.wordbook-chip-del {
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 15px;
+  padding: 4px 7px;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.wordbook-chip-del:hover {
+  color: var(--text-danger);
+  background: var(--fill-danger-soft);
+}
+
+.wordbook-practice-bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- Phrase / Idiom Continuous Mode (詞彙連打) ---- */
+
+.phrase-stage {
+  gap: 12px;
+}
+
+.phrase-cat-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.phrase-stats-row {
+  display: flex;
+  justify-content: center;
+}
+
+.phrase-glyph-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 6px;
+  flex-wrap: wrap;
+}
+
+.phrase-char {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  height: 76px;
+  padding: 0 10px;
+  border-radius: 16px;
+  border: 2px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+}
+
+.phrase-char.is-cur {
+  border-color: var(--brand-primary);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+}
+
+.phrase-char.is-cur.is-bad {
+  border-color: var(--text-danger);
+  background: var(--fill-danger-soft);
+  color: var(--text-danger);
+}
+
+.phrase-char.is-done {
+  border-color: var(--text-success);
+  background: var(--fill-success-soft);
+  color: var(--text-success);
+}
+
+.phrase-char.is-skip {
+  border-style: dashed;
+  opacity: 0.55;
+}
+
+.phrase-next-preview {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+.phrase-next-preview span {
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 720px) {
+  .phrase-glyph-row {
+    gap: 6px;
+    padding: 4px 2px;
+  }
+  .phrase-char {
+    min-width: 52px;
+    height: 60px;
+    font-size: 34px;
+    border-radius: 12px;
+  }
+}

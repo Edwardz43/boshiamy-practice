@@ -6,6 +6,7 @@ export const MOBILE_MODES: { value: NavMode; label: string; shortLabel: string; 
   { value: "roots", label: "字根練習", shortLabel: "字根", group: "practice" },
   { value: "short", label: "簡碼練習", shortLabel: "簡碼", group: "practice" },
   { value: "chars", label: "常用字", shortLabel: "常用字", group: "practice" },
+  { value: "phrases", label: "詞彙連打", shortLabel: "詞彙", group: "practice" },
   { value: "article", label: "文章練習", shortLabel: "文章", group: "practice" },
   { value: "timed", label: "限時挑戰", shortLabel: "限時", group: "practice" },
   { value: "lookup", label: "查碼", shortLabel: "查碼", group: "tools" },

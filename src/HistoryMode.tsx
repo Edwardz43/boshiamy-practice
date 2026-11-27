@@ -44,6 +44,7 @@ const FILTERS: { v: Filter; label: string }[] = [
   { v: "roots", label: "字根" },
   { v: "chars", label: "常用字" },
   { v: "short", label: "簡碼" },
+  { v: "phrases", label: "詞彙" },
   { v: "timed", label: "限時" },
   { v: "article", label: "文章" },
 ];
@@ -55,6 +56,7 @@ export default function HistoryMode(props: {
   stats: SavedStats;
   settings: BackupSettings;
   bests?: PersonalBests;
+  wordbook?: string[];
   onStartWeakReview?: () => void;
   onOpenSettings: () => void;
   onImport: (data: BackupFile, mode: ImportMode) => void;
@@ -84,7 +86,13 @@ export default function HistoryMode(props: {
   const canShare = useMemo(() => canShareBackupFiles(), []);
 
   const backup = (): BackupFile =>
-    makeBackup({ stats: props.stats, history: props.history, settings: props.settings, bests: props.bests });
+    makeBackup({
+      stats: props.stats,
+      history: props.history,
+      settings: props.settings,
+      bests: props.bests,
+      wordbook: props.wordbook,
+    });
 
   function doExport(): void {
     setErr("");

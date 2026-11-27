@@ -1,5 +1,7 @@
 // Pure helpers for daily practice history and backup (no React), so they can be unit-tested with plain node.
 
+import { mergeWordbook, sanitizeWordbook } from "./wordbookLogic";
+
 export const STATS_KEY = "boshiamy-practice-stats-v1";
 export const HISTORY_KEY = "boshiamy-practice-history-v1";
 export const AUTO_NEXT_KEY = "boshiamy-auto-next-v2";
@@ -17,12 +19,13 @@ export const MAX_MAP_KEY_LEN = 16;
 export const MAX_INT = 1_000_000_000;
 const DANGEROUS_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export type DrillMode = "roots" | "chars" | "short" | "timed" | "article";
-export const DRILL_MODES: DrillMode[] = ["roots", "chars", "short", "timed", "article"];
+export type DrillMode = "roots" | "chars" | "short" | "phrases" | "timed" | "article";
+export const DRILL_MODES: DrillMode[] = ["roots", "chars", "short", "phrases", "timed", "article"];
 export const MODE_LABEL: Record<DrillMode, string> = {
   roots: "字根",
   chars: "常用字",
   short: "簡碼",
+  phrases: "詞彙",
   timed: "限時",
   article: "文章",
 };
@@ -38,6 +41,7 @@ export type DayRecord = {
   roots?: ModeStats;
   chars?: ModeStats;
   short?: ModeStats;
+  phrases?: ModeStats;
   timed?: ModeStats;
   article?: ModeStats;
 };
@@ -110,6 +114,7 @@ export type BackupFile = {
   history: HistoryStore;
   settings: BackupSettings;
   bests?: PersonalBests;
+  wordbook?: string[];
 };
 
 export function localDate(d: Date = new Date()): string {
@@ -413,6 +418,7 @@ export function makeBackup(input: {
   history: HistoryStore;
   settings: BackupSettings;
   bests?: PersonalBests;
+  wordbook?: string[];
   exportedAt?: string;
 }): BackupFile {
   const out: BackupFile = {
@@ -430,6 +436,12 @@ export function makeBackup(input: {
       cleanBests.articleBestCpm != null
     ) {
       out.bests = cleanBests;
+    }
+  }
+  if (input.wordbook) {
+    const cleanWordbook = sanitizeWordbook(input.wordbook);
+    if (cleanWordbook.length > 0) {
+      out.wordbook = cleanWordbook;
     }
   }
   return out;
@@ -450,7 +462,13 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, error: "備份檔格式不正確。" };
   }
-  const p = parsed as Partial<BackupFile> & { history?: unknown; stats?: unknown; settings?: unknown; bests?: unknown };
+  const p = parsed as Partial<BackupFile> & {
+    history?: unknown;
+    stats?: unknown;
+    settings?: unknown;
+    bests?: unknown;
+    wordbook?: unknown;
+  };
   if (typeof p.version !== "number" || p.version < 1 || p.version > BACKUP_VERSION) {
     return { ok: false, error: "這個備份檔版本無法匯入。" };
   }
@@ -462,6 +480,7 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
     history: sanitizeHistory(p.history ?? emptyHistory()),
     settings: sanitizeSettings(p.settings),
     bests: p.bests !== undefined ? sanitizeBests(p.bests) : undefined,
+    wordbook: p.wordbook !== undefined ? sanitizeWordbook(p.wordbook) : undefined,
     exportedAt: typeof p.exportedAt === "string" ? p.exportedAt : new Date().toISOString(),
   });
   return { ok: true, data };
@@ -470,18 +489,33 @@ export function parseBackup(raw: string): { ok: true; data: BackupFile } | { ok:
 export type ImportMode = "merge" | "replace";
 
 export function applyBackup(
-  current: { stats: SavedStats; history: HistoryStore; settings: BackupSettings; bests?: PersonalBests },
+  current: {
+    stats: SavedStats;
+    history: HistoryStore;
+    settings: BackupSettings;
+    bests?: PersonalBests;
+    wordbook?: string[];
+  },
   incoming: BackupFile,
   mode: ImportMode,
-): { stats: SavedStats; history: HistoryStore; settings: BackupSettings; bests: PersonalBests } {
+): {
+  stats: SavedStats;
+  history: HistoryStore;
+  settings: BackupSettings;
+  bests: PersonalBests;
+  wordbook: string[];
+} {
   const curBests = sanitizeBests(current.bests);
   const incBests = sanitizeBests(incoming.bests);
+  const curWordbook = sanitizeWordbook(current.wordbook);
+  const incWordbook = sanitizeWordbook(incoming.wordbook);
   if (mode === "replace") {
     return {
       stats: sanitizeStats(incoming.stats),
       history: sanitizeHistory(incoming.history),
       settings: sanitizeSettings(incoming.settings),
       bests: incBests,
+      wordbook: incWordbook,
     };
   }
   return {
@@ -489,6 +523,7 @@ export function applyBackup(
     history: mergeHistory(current.history, incoming.history),
     settings: current.settings,
     bests: mergeBests(curBests, incBests),
+    wordbook: mergeWordbook(curWordbook, incWordbook),
   };
 }
 
