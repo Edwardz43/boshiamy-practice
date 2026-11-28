@@ -1,0 +1,19 @@
+# 排除體積龐大的純資料檔與原始字典（資料格式已記錄於 ARCHITECTURE.md）
+public/liu-table.json
+public/opencc-chars.json
+public/opencc-LICENSE.txt
+data-src/
+
+# 排除圖片與二進位資產
+public/*.png
+
+# 排除依賴、版本控制、建置產物、lockfile 與本機暫存
+node_modules/
+.git/
+dist/
+package-lock.json
+mobile-shots/
+backups/
+.context/
+*.log
+.DS_Store

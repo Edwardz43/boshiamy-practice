@@ -25,3 +25,8 @@
 - **開發完即部署**：每次開發完成並通過上述發佈前驗證後，直接建立 commit 並推送至 `main` 觸發自動部署（無需額外等待確認），方便立刻在手機等裝置上試用。
 - 推送至 `main` 後由 `.github/workflows/pages.yml` 自動 `npm ci`、`npm run build` 並部署至 GitHub Pages；切勿再手動把 `dist/` 覆蓋進 `main` 根目錄。
 - 舊版純 `dist/` 最後狀態已保留於 git tag `legacy-dist-69777e3`。
+
+## 協作交接與收尾規範
+
+- **施工原則**：當 Ed 提供 `HANDOFF.md` 或 Google Docs 規格連結時，嚴格依據規格施工，減少不必要的全局探索，完成後執行既有測試並推送部署。
+- **收尾同步**：每次完成一個 Feature 並 `git push` 後，若目錄結構或資料格式有變動，順手更新 `ARCHITECTURE.md`，並執行 `npm run sync-context` 更新程式碼快照。
