@@ -60,6 +60,7 @@ import { getSimplifiedHints } from "./simplifiedLogic";
 import { SimpHintBar } from "./SimpHintBar";
 import { KeycapBreakdown } from "./KeycapBreakdown";
 import { createBag, drawFromBag, shuffle, type DrawBag } from "./drawLogic";
+import { decayMissMap } from "./weaknessLogic";
 import {
   addWordbookChars,
   loadWordbookFromStorage,
@@ -762,6 +763,8 @@ export default function App(): JSX.Element {
     }),
   );
   const [wordbookPracticeTick, setWordbookPracticeTick] = useState<number>(0);
+  const [graduatedBanner, setGraduatedBanner] = useState<string | null>(null);
+  const [lookupPrefill, setLookupPrefill] = useState<{ text: string; tick: number }>({ text: "", tick: 0 });
   const [timedRunSummary, setTimedRunSummary] = useState<{ isNewBest: boolean; prevBest: TimedRecord | null } | null>(
     null,
   );
@@ -772,6 +775,20 @@ export default function App(): JSX.Element {
   const [left, setLeft] = useState<number>(60);
   const [tOk, setTOk] = useState<number>(0);
   const [tTried, setTTried] = useState<number>(0);
+
+  const wordbookSet = useMemo(() => new Set(wordbook), [wordbook]);
+  const charPrimaryCode = useMemo(() => {
+    const map: Record<string, string> = Object.create(null);
+    for (const item of CHARS) {
+      if (!item.k.length) continue;
+      let best = item.k[0];
+      for (const code of item.k) {
+        if (code.length < best.length) best = code;
+      }
+      map[item.c] = best;
+    }
+    return map;
+  }, []);
 
   const pool = useMemo(() => {
     const base = CHARS.filter((x) => x.r <= diff);
@@ -791,6 +808,13 @@ export default function App(): JSX.Element {
     if (!review) return ROOTS;
     return ROOTS.filter((x) => (missRoots[rootId(x)] ?? 0) > 0);
   }, [review, missRoots]);
+
+  const poolRef = useRef(pool);
+  poolRef.current = pool;
+  const shortPoolRef = useRef(shortPool);
+  shortPoolRef.current = shortPool;
+  const rootPoolRef = useRef(rootPool);
+  rootPoolRef.current = rootPool;
 
   const missedCharList = useMemo(() => topMissed(missChars, 8), [missChars]);
   const missedShortList = useMemo(
@@ -823,8 +847,9 @@ export default function App(): JSX.Element {
 
   function nextRoot(): void {
     clearAutoNext();
+    setGraduatedBanner(null);
     setPickedId(null);
-    const item = drawFromBag(rootBag.current, rootPool, rootId);
+    const item = drawFromBag(rootBag.current, rootPoolRef.current, rootId);
     setRootQ(item);
     setTyped("");
     setHintOn(false);
@@ -840,10 +865,11 @@ export default function App(): JSX.Element {
 
   function nextChar(): void {
     clearAutoNext();
+    setGraduatedBanner(null);
     // Review mode stays a plain shuffle-bag; normal practice / timed use weighted shuffle-bag.
     const item = drawFromBag(
       charBag.current,
-      pool,
+      poolRef.current,
       (x) => x.c,
       review ? undefined : { weightOf: charWeight },
     );
@@ -857,10 +883,11 @@ export default function App(): JSX.Element {
 
   function nextShort(): void {
     clearAutoNext();
+    setGraduatedBanner(null);
     // Drill every 1-key short code once per round; higher tiers and normal practice use weighted shuffle-bag.
     const item = drawFromBag(
       shortBag.current,
-      shortPool,
+      shortPoolRef.current,
       (x) => x.c,
       review || shortTier === "one" ? undefined : { weightOf: charWeight },
     );
@@ -986,6 +1013,7 @@ export default function App(): JSX.Element {
     setStreak(0);
     setMissChars({});
     setMissRoots({});
+    setGraduatedBanner(null);
     setHistory(emptyHistory());
     setBests(emptyBests());
     setTimedRunSummary(null);
@@ -1070,12 +1098,52 @@ export default function App(): JSX.Element {
     }
   }
 
+  function toggleWordbook(ch: string): void {
+    setWordbook((w) => toggleWordbookChar(w, ch).next);
+  }
+  function addWordbookMany(chars: string[]): void {
+    setWordbook((w) => addWordbookChars(w, chars).next);
+  }
+  function openLookupFor(text: string): void {
+    const trimmed = text.trim();
+    setShowSettings(false);
+    setShowKb(false);
+    setShowShortTable(false);
+    setReview(false);
+    setShortGrade(null);
+    setGraduatedBanner(null);
+    setPhase("idle");
+    setMode("lookup");
+    if (trimmed) {
+      setLookupPrefill((p) => ({ text: trimmed, tick: p.tick + 1 }));
+    }
+  }
+
   function markMissChar(ch: string): void {
     setMissChars((m) => ({ ...m, [ch]: (m[ch] ?? 0) + 1 }));
   }
   function markMissRoot(r: RootItem): void {
     const id = rootId(r);
     setMissRoots((m) => ({ ...m, [id]: (m[id] ?? 0) + 1 }));
+  }
+  function decayMissChar(ch: string, showGraduated = false): void {
+    const preview = decayMissMap(missChars, ch);
+    if (showGraduated && preview.graduated) {
+      setGraduatedBanner("✓ 已移出弱點");
+    }
+    if (preview.decayed) {
+      setMissChars((m) => decayMissMap(m, ch).next);
+    }
+  }
+  function decayMissRoot(r: RootItem, showGraduated = false): void {
+    const id = rootId(r);
+    const preview = decayMissMap(missRoots, id);
+    if (showGraduated && preview.graduated) {
+      setGraduatedBanner("✓ 已移出弱點");
+    }
+    if (preview.decayed) {
+      setMissRoots((m) => decayMissMap(m, id).next);
+    }
   }
 
   function grade(correct: boolean): void {
@@ -1105,10 +1173,12 @@ export default function App(): JSX.Element {
     if (!rootQ || verdict !== "idle") return;
     const key = raw.trim().toLowerCase();
     if (!key) return;
+    setGraduatedBanner(null);
     const good = key === rootQ.key;
     grade(good);
     noteAttempt("roots", good);
-    if (!good) markMissRoot(rootQ);
+    if (good) decayMissRoot(rootQ, true);
+    else markMissRoot(rootQ);
     if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot());
   }
 
@@ -1116,6 +1186,7 @@ export default function App(): JSX.Element {
     if (!charQ || verdict !== "idle") return;
     const code = raw.trim().toLowerCase();
     if (!code) return;
+    setGraduatedBanner(null);
     const firsts = charQ.k;
     const extras = charQ.a ?? [];
     const goodFirst = firsts.indexOf(code) >= 0;
@@ -1128,7 +1199,8 @@ export default function App(): JSX.Element {
     grade(good);
     noteAttempt(timed ? "timed" : "chars", good);
     setUsedSelect(goodExtra && !goodFirst);
-    if (!good) markMissChar(charQ.c);
+    if (good) decayMissChar(charQ.c, !timed);
+    else markMissChar(charQ.c);
     if (timed) {
       window.setTimeout(() => {
         setVerdict("idle");
@@ -1142,12 +1214,14 @@ export default function App(): JSX.Element {
   function submitShort(raw: string): void {
     if (!charQ || verdict !== "idle") return;
     if (!raw.trim()) return;
+    setGraduatedBanner(null);
     const res = gradeShortAnswer(charQ, raw);
     grade(res.ok);
     noteAttempt("short", res.ok);
     setShortGrade(res);
     setUsedSelect(res.kind === "select");
-    if (!res.ok) markMissChar(charQ.c);
+    if (res.ok) decayMissChar(charQ.c, true);
+    else markMissChar(charQ.c);
     if (res.ok && autoNext && isMobile) {
       scheduleAutoNext(() => nextShort());
     }
@@ -1181,17 +1255,23 @@ export default function App(): JSX.Element {
     setMode(v);
     setReview(false);
     setShortGrade(null);
+    setGraduatedBanner(null);
+    if (v === "lookup") {
+      setLookupPrefill((p) => (p.text ? { ...p, text: "" } : p));
+    }
     if (v !== "short") setShowShortTable(false);
     if (v !== "timed") setPhase("idle");
   }
 
   function pickChoice(ch: RootItem): void {
     if (verdict !== "idle" || !rootQ) return;
+    setGraduatedBanner(null);
     setPickedId(rootId(ch));
     const good = ch.key === rootQ.key;
     grade(good);
     noteAttempt("roots", good);
-    if (!good) markMissRoot(rootQ);
+    if (good) decayMissRoot(rootQ, true);
+    else markMissRoot(rootQ);
     if (good && autoNext && isMobile) scheduleAutoNext(() => nextRoot());
   }
 
@@ -1505,6 +1585,58 @@ export default function App(): JSX.Element {
   }
 
   const curTimedBest = bests.timedBestByDiff[String(diff)] ?? null;
+  const isReviewCleared =
+    review &&
+    ((mode === "roots" && !rootQ && rootPool.length === 0) ||
+      (mode === "short" && !charQ && shortPool.length === 0) ||
+      (mode === "chars" && !charQ && pool.length === 0));
+  const graduatedBadgeEl =
+    verdict === "ok" && graduatedBanner ? (
+      <span className="weak-graduated-badge" data-testid="weak-graduated-badge">
+        {graduatedBanner}
+      </span>
+    ) : null;
+  const renderDrillActions = (ch: string): JSX.Element => {
+    const starred = wordbookSet.has(ch);
+    return (
+      <div className="drill-feedback-actions">
+        <button
+          type="button"
+          className={"lookup-star-btn" + (starred ? " is-starred" : "")}
+          data-testid="drill-star-btn"
+          data-char={ch}
+          aria-pressed={starred}
+          onClick={() => toggleWordbook(ch)}
+        >
+          {starred ? "★ 已收藏" : "☆ 生字本"}
+        </button>
+        <button
+          type="button"
+          className="lookup-copy-btn"
+          data-testid="drill-lookup-btn"
+          data-char={ch}
+          onClick={() => openLookupFor(ch)}
+        >
+          查碼
+        </button>
+      </div>
+    );
+  };
+  const reviewClearedEl = (
+    <div className="review-cleared-state" data-testid="review-cleared-state">
+      <p style={{ ...theme.font.body1, color: theme.text.success, fontWeight: theme.weight.semibold, margin: 0 }}>
+        弱點已全部複習完成！
+      </p>
+      <button
+        type="button"
+        className="ui-btn ui-btn-primary"
+        data-testid="review-back-normal-btn"
+        onClick={() => setReview(false)}
+      >
+        回到一般練習
+      </button>
+    </div>
+  );
   const comboToastEl = comboBurst ? (
     <div key={comboBurst.tick} className="combo-toast" data-testid="combo-toast" role="status" aria-live="polite">
       🔥 {comboBurst.value} 連對！
@@ -1532,11 +1664,6 @@ export default function App(): JSX.Element {
     const timedStartLabel = phase === "over" ? "再來一次" : "開始挑戰";
     const submitDisabled =
       verdict === "idle" && typingMode && typed.trim() === "" && !(mode === "timed" && phase !== "run");
-    const emptyReview =
-      review &&
-      ((mode === "roots" && rootPool.length === 0) ||
-        (mode === "short" && shortPool.length === 0) ||
-        (mode !== "roots" && mode !== "short" && pool.length === 0));
 
     const header = (
       <header className="mobile-header">
@@ -1573,14 +1700,8 @@ export default function App(): JSX.Element {
       "mobile-glyph" + (verdict === "ok" ? " flash-ok" : verdict === "bad" ? " flash-bad" : "") + (extra ? " " + extra : "");
 
     let stageInner: JSX.Element;
-    if (emptyReview) {
-      stageInner = (
-        <div className="mobile-q">
-          <p className="mobile-msg" style={{ color: theme.text.secondary }}>
-            這輪還沒有錯字可複習，先練幾題再來。
-          </p>
-        </div>
-      );
+    if (isReviewCleared) {
+      stageInner = <div className="mobile-q">{reviewClearedEl}</div>;
     } else if (mode === "roots" && rootQ && rootDir === "forward") {
       stageInner = (
         <div className="mobile-q">
@@ -1597,9 +1718,12 @@ export default function App(): JSX.Element {
             <p className="mobile-caption">打出對應的英文鍵，按送出才會判斷。</p>
           )}
           {verdict === "ok" ? (
-            <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
-              答對了，{rootQ.glyph} 就是 {up(rootQ.key)} 鍵。
-            </p>
+            <div style={{ textAlign: "center" }}>
+              <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
+                答對了，{rootQ.glyph} 就是 {up(rootQ.key)} 鍵。
+              </p>
+              {graduatedBadgeEl}
+            </div>
           ) : null}
           {verdict === "bad" ? (
             <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
@@ -1644,9 +1768,12 @@ export default function App(): JSX.Element {
             </p>
           ) : null}
           {verdict === "ok" ? (
-            <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
-              答對了。
-            </p>
+            <div style={{ textAlign: "center" }}>
+              <p className="mobile-msg" style={{ color: theme.text.success, fontWeight: theme.weight.semibold }}>
+                答對了。
+              </p>
+              {graduatedBadgeEl}
+            </div>
           ) : null}
           {verdict === "bad" ? (
             <p className="mobile-msg" style={{ color: theme.text.danger, fontWeight: theme.weight.semibold }}>
@@ -1679,6 +1806,7 @@ export default function App(): JSX.Element {
                   字根：{breakdown(charQ.k[0])}
                 </span>
               </p>
+              {graduatedBadgeEl}
               <KeycapBreakdown
                 code={charQ.k[0]}
                 verdict="ok"
@@ -1686,6 +1814,7 @@ export default function App(): JSX.Element {
                 compact
               />
               <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} compact />
+              {renderDrillActions(charQ.c)}
             </div>
           ) : null}
           {verdict === "bad" ? (
@@ -1716,6 +1845,7 @@ export default function App(): JSX.Element {
                 ]}
                 compact
               />
+              {renderDrillActions(charQ.c)}
             </div>
           ) : null}
         </div>
@@ -1763,6 +1893,7 @@ export default function App(): JSX.Element {
                   {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
                 </span>
               </p>
+              {graduatedBadgeEl}
               <KeycapBreakdown
                 code={sc0}
                 altCode={!shortGrade.ok && fc0 ? fc0 : undefined}
@@ -1779,6 +1910,7 @@ export default function App(): JSX.Element {
                 shownCodes={!shortGrade.ok && fc0 ? [sc0, fc0] : [sc0]}
                 compact
               />
+              {renderDrillActions(charQ.c)}
             </div>
           ) : null}
         </div>
@@ -1884,11 +2016,12 @@ export default function App(): JSX.Element {
       >
         <div className="settings-block">
           <p className="settings-label">練習模式</p>
-          <div className="settings-seg settings-seg-7">
+          <div className="settings-seg settings-seg-8">
             {([
               ["roots", "字根練習"],
               ["short", "簡碼練習"],
               ["chars", "常用字"],
+              ["phrases", "詞彙連打"],
               ["article", "文章練習"],
               ["timed", "限時挑戰"],
               ["lookup", "查碼"],
@@ -1922,7 +2055,7 @@ export default function App(): JSX.Element {
           </div>
         </div>
         <MobileThemeSection />
-        {mode === "article" || mode === "lookup" || mode === "history" ? null : (
+        {mode === "article" || mode === "phrases" || mode === "lookup" || mode === "history" ? null : (
         <div className="settings-block">
           <p className="settings-label">
             {mode === "roots" ? "練習方向" : mode === "short" ? "簡碼範圍" : "常用字範圍"}
@@ -2148,7 +2281,12 @@ export default function App(): JSX.Element {
             settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
             bests={bests}
             wordbook={wordbook}
+            reps={KEY_REPS}
+            charPrimaryCode={charPrimaryCode}
             onStartWeakReview={startWeakReview}
+            onLookupChar={openLookupFor}
+            onToggleWordbook={toggleWordbook}
+            onAddWordbookMany={addWordbookMany}
             onOpenSettings={() => setShowSettings(true)}
             onImport={importBackup}
             mobileModeStrip={mobileModeStrip}
@@ -2177,11 +2315,14 @@ export default function App(): JSX.Element {
             soundOn={soundOn}
             sheetOpen={showSettings || showKb}
             startPracticeTick={wordbookPracticeTick}
-            onToggleWordbook={(ch) => setWordbook((w) => toggleWordbookChar(w, ch).next)}
-            onAddWordbookMany={(chars) => setWordbook((w) => addWordbookChars(w, chars).next)}
+            prefillQuery={lookupPrefill.text}
+            prefillTick={lookupPrefill.tick}
+            onToggleWordbook={toggleWordbook}
+            onAddWordbookMany={addWordbookMany}
             onRemoveWordbook={(ch) => setWordbook((w) => removeWordbookChar(w, ch))}
             onClearWordbook={() => setWordbook([])}
-            onWordbookAttempt={({ correct, ms }) => {
+            onWordbookAttempt={({ ch, correct, ms }) => {
+              if (correct && ch) decayMissChar(ch);
               setHistory((h) => recordAttempt(h, "chars", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
               if (soundOn) {
                 if (correct) playOkSound();
@@ -2212,10 +2353,14 @@ export default function App(): JSX.Element {
             reps={KEY_REPS}
             sheetOpen={showSettings || showKb}
             soundOn={soundOn}
+            wordbook={wordbook}
+            onToggleWordbook={toggleWordbook}
+            onLookupChar={openLookupFor}
             onMiss={(ch) => {
               if (CHAR_SET.has(ch)) markMissChar(ch);
             }}
-            onAttempt={({ correct, ms }) => {
+            onAttempt={({ ch, correct, ms }) => {
+              if (correct && ch) decayMissChar(ch);
               setHistory((h) => recordAttempt(h, "phrases", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
               if (soundOn) {
                 if (correct) playOkSound();
@@ -2247,10 +2392,15 @@ export default function App(): JSX.Element {
             reps={KEY_REPS}
             sheetOpen={showSettings || showKb}
             bestCpm={bests.articleBestCpm?.cpm}
+            wordbook={wordbook}
+            onToggleWordbook={toggleWordbook}
+            onAddWordbookMany={addWordbookMany}
+            onLookupChar={openLookupFor}
             onMiss={(ch) => {
               if (CHAR_SET.has(ch)) markMissChar(ch);
             }}
-            onAttempt={({ correct, ms }) => {
+            onAttempt={({ ch, correct, ms }) => {
+              if (correct && ch) decayMissChar(ch);
               setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
               if (soundOn) {
                 if (correct) playOkSound();
@@ -2281,7 +2431,15 @@ export default function App(): JSX.Element {
     }
 
     let footer: JSX.Element;
-    if (mode === "timed" && phase !== "run") {
+    if (isReviewCleared) {
+      footer = (
+        <div className="os-actions">
+          <button type="button" className="os-action" onClick={() => switchMode("history")} style={{ minHeight: 52 }}>
+            查看紀錄
+          </button>
+        </div>
+      );
+    } else if (mode === "timed" && phase !== "run") {
       footer = (
         <div className="os-actions">
           <button type="button" className="os-action is-primary" onClick={startTimed} style={{ minHeight: 52 }}>
@@ -2491,15 +2649,6 @@ export default function App(): JSX.Element {
           </button>
         </div>
 
-        {review &&
-        ((mode === "roots" && rootPool.length === 0) ||
-          (mode === "short" && shortPool.length === 0) ||
-          (mode !== "roots" && mode !== "short" && pool.length === 0)) ? (
-          <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>
-            這輪還沒有錯字可複習，先練幾題再來。
-          </p>
-        ) : null}
-
         {mode === "short" && showShortTable ? (
           <section className="stage-card">
             <h2 style={{ ...theme.font.heading3, margin: "0 0 12px", fontWeight: theme.weight.semibold }}>簡碼速查表</h2>
@@ -2569,6 +2718,7 @@ export default function App(): JSX.Element {
                       <p style={{ ...theme.font.body1, color: theme.text.success, margin: "0 0 6px", fontWeight: theme.weight.semibold }}>
                         答對了，{rootQ.glyph} 就是 {up(rootQ.key)} 鍵。
                       </p>
+                      {graduatedBadgeEl}
                       <KeycapBreakdown code={rootQ.key} verdict="ok" reps={KEY_REPS} />
                     </div>
                   ) : null}
@@ -2620,9 +2770,12 @@ export default function App(): JSX.Element {
                     </p>
                   ) : null}
                   {verdict === "ok" ? (
-                    <p style={{ ...theme.font.body1, color: theme.text.success, margin: 0, fontWeight: theme.weight.semibold }}>
-                      答對了。
-                    </p>
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{ ...theme.font.body1, color: theme.text.success, margin: 0, fontWeight: theme.weight.semibold }}>
+                        答對了。
+                      </p>
+                      {graduatedBadgeEl}
+                    </div>
                   ) : null}
                   {verdict === "bad" ? (
                     <p style={{ ...theme.font.body1, color: theme.text.danger, margin: 0, fontWeight: theme.weight.semibold, textAlign: "center" }}>
@@ -2631,6 +2784,8 @@ export default function App(): JSX.Element {
                   ) : null}
                 </div>
               )
+            ) : review && rootPool.length === 0 ? (
+              reviewClearedEl
             ) : (
               <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>目前沒有可練的字根。</p>
             )}
@@ -2685,8 +2840,10 @@ export default function App(): JSX.Element {
                     <p style={{ ...theme.font.caption, color: theme.text.secondary, margin: 0, overflowWrap: "anywhere" }}>
                       字根：{breakdown(charQ.k[0])}
                     </p>
+                    {graduatedBadgeEl}
                     <KeycapBreakdown code={charQ.k[0]} verdict="ok" reps={KEY_REPS} />
                     <SimpHintBar hints={charSimpHints} reps={KEY_REPS} shownCodes={[charQ.k[0]]} />
+                    {renderDrillActions(charQ.c)}
                   </div>
                 ) : null}
                 {verdict === "bad" ? (
@@ -2714,9 +2871,12 @@ export default function App(): JSX.Element {
                         ...(charQ.k[1] ? [charQ.k.find((x) => x.length >= 3) ?? charQ.k[1]] : []),
                       ]}
                     />
+                    {renderDrillActions(charQ.c)}
                   </div>
                 ) : null}
               </div>
+            ) : review && pool.length === 0 ? (
+              reviewClearedEl
             ) : (
               <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>目前沒有可練的字。</p>
             )}
@@ -2787,6 +2947,7 @@ export default function App(): JSX.Element {
                         簡碼字根：{breakdown(sc0)}
                         {!shortGrade.ok && fc0 ? " 　全碼字根：" + breakdown(fc0) : ""}
                       </p>
+                      {graduatedBadgeEl}
                       <KeycapBreakdown
                         code={sc0}
                         altCode={!shortGrade.ok && fc0 ? fc0 : undefined}
@@ -2801,11 +2962,14 @@ export default function App(): JSX.Element {
                         reps={KEY_REPS}
                         shownCodes={!shortGrade.ok && fc0 ? [sc0, fc0] : [sc0]}
                       />
+                      {renderDrillActions(charQ.c)}
                     </div>
                   ) : null}
                 </div>
               );
-            })() : (
+            })() : review && shortPool.length === 0 ? (
+              reviewClearedEl
+            ) : (
               <p style={{ ...theme.font.body1, color: theme.text.secondary, margin: 0 }}>目前沒有可練的簡碼字。</p>
             )}
           </section>
@@ -2822,11 +2986,14 @@ export default function App(): JSX.Element {
               soundOn={soundOn}
               sheetOpen={themeOpen || shortcutsOpen}
               startPracticeTick={wordbookPracticeTick}
-              onToggleWordbook={(ch) => setWordbook((w) => toggleWordbookChar(w, ch).next)}
-              onAddWordbookMany={(chars) => setWordbook((w) => addWordbookChars(w, chars).next)}
+              prefillQuery={lookupPrefill.text}
+              prefillTick={lookupPrefill.tick}
+              onToggleWordbook={toggleWordbook}
+              onAddWordbookMany={addWordbookMany}
               onRemoveWordbook={(ch) => setWordbook((w) => removeWordbookChar(w, ch))}
               onClearWordbook={() => setWordbook([])}
-              onWordbookAttempt={({ correct, ms }) => {
+              onWordbookAttempt={({ ch, correct, ms }) => {
+                if (correct && ch) decayMissChar(ch);
                 setHistory((h) => recordAttempt(h, "chars", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
                 if (soundOn) {
                   if (correct) playOkSound();
@@ -2846,10 +3013,14 @@ export default function App(): JSX.Element {
               reps={KEY_REPS}
               sheetOpen={themeOpen || shortcutsOpen}
               soundOn={soundOn}
+              wordbook={wordbook}
+              onToggleWordbook={toggleWordbook}
+              onLookupChar={openLookupFor}
               onMiss={(ch) => {
                 if (CHAR_SET.has(ch)) markMissChar(ch);
               }}
-              onAttempt={({ correct, ms }) => {
+              onAttempt={({ ch, correct, ms }) => {
+                if (correct && ch) decayMissChar(ch);
                 setHistory((h) => recordAttempt(h, "phrases", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
                 if (soundOn) {
                   if (correct) playOkSound();
@@ -2872,7 +3043,12 @@ export default function App(): JSX.Element {
               settings={{ autoNext, theme: themeId, colorMode, dailyGoal, sound: soundOn }}
               bests={bests}
               wordbook={wordbook}
+              reps={KEY_REPS}
+              charPrimaryCode={charPrimaryCode}
               onStartWeakReview={startWeakReview}
+              onLookupChar={openLookupFor}
+              onToggleWordbook={toggleWordbook}
+              onAddWordbookMany={addWordbookMany}
               onOpenSettings={() => undefined}
               onImport={importBackup}
             />
@@ -2887,10 +3063,15 @@ export default function App(): JSX.Element {
               reps={KEY_REPS}
               sheetOpen={false}
               bestCpm={bests.articleBestCpm?.cpm}
+              wordbook={wordbook}
+              onToggleWordbook={toggleWordbook}
+              onAddWordbookMany={addWordbookMany}
+              onLookupChar={openLookupFor}
               onMiss={(ch) => {
                 if (CHAR_SET.has(ch)) markMissChar(ch);
               }}
-              onAttempt={({ correct, ms }) => {
+              onAttempt={({ ch, correct, ms }) => {
+                if (correct && ch) decayMissChar(ch);
                 setHistory((h) => recordAttempt(h, "article", { tried: 1, ok: correct ? 1 : 0, ms: clipMs(ms) }));
                 if (soundOn) {
                   if (correct) playOkSound();
@@ -3149,12 +3330,33 @@ export default function App(): JSX.Element {
                       const item = CHARS.find((c) => c.c === x.id);
                       const sc = item ? fmtCodes(shortCodesOf(item)) : "";
                       const fc = item && fullCodesOf(item).length > 0 ? fmtCodes(fullCodesOf(item)) : "";
+                      const starred = wordbookSet.has(x.id);
                       return (
-                        <div key={x.id} className="missed-card">
-                          <span className="missed-card-glyph">{x.id}</span>
-                          <span className="missed-card-code">簡碼 {sc}</span>
-                          {fc ? <span className="missed-card-full">全碼 {fc}</span> : null}
-                          <span className="missed-card-count">錯 {x.n} 次</span>
+                        <div key={x.id} className="missed-card is-interactive">
+                          <button
+                            type="button"
+                            className={"missed-card-star" + (starred ? " is-starred" : "")}
+                            data-testid="sidebar-missed-star"
+                            data-char={x.id}
+                            aria-pressed={starred}
+                            aria-label={(starred ? "移出生字本：" : "加入生字本：") + x.id}
+                            onClick={() => toggleWordbook(x.id)}
+                          >
+                            {starred ? "★" : "☆"}
+                          </button>
+                          <button
+                            type="button"
+                            className="missed-card-main"
+                            data-testid="sidebar-missed-lookup"
+                            data-char={x.id}
+                            title={"查「" + x.id + "」字碼"}
+                            onClick={() => openLookupFor(x.id)}
+                          >
+                            <span className="missed-card-glyph">{x.id}</span>
+                            <span className="missed-card-code">簡碼 {sc}</span>
+                            {fc ? <span className="missed-card-full">全碼 {fc}</span> : null}
+                            <span className="missed-card-count">錯 {x.n} 次</span>
+                          </button>
                         </div>
                       );
                     })}
@@ -3166,11 +3368,32 @@ export default function App(): JSX.Element {
                 <div className="missed-grid">
                   {missedCharList.map((x) => {
                     const item = CHARS.find((c) => c.c === x.id);
+                    const starred = wordbookSet.has(x.id);
                     return (
-                      <div key={x.id} className="missed-card">
-                        <span className="missed-card-glyph">{x.id}</span>
-                        <span className="missed-card-code">{item ? fmtCodes(item.k.slice(0, 2)) : ""}</span>
-                        <span className="missed-card-count">錯 {x.n} 次</span>
+                      <div key={x.id} className="missed-card is-interactive">
+                        <button
+                          type="button"
+                          className={"missed-card-star" + (starred ? " is-starred" : "")}
+                          data-testid="sidebar-missed-star"
+                          data-char={x.id}
+                          aria-pressed={starred}
+                          aria-label={(starred ? "移出生字本：" : "加入生字本：") + x.id}
+                          onClick={() => toggleWordbook(x.id)}
+                        >
+                          {starred ? "★" : "☆"}
+                        </button>
+                        <button
+                          type="button"
+                          className="missed-card-main"
+                          data-testid="sidebar-missed-lookup"
+                          data-char={x.id}
+                          title={"查「" + x.id + "」字碼"}
+                          onClick={() => openLookupFor(x.id)}
+                        >
+                          <span className="missed-card-glyph">{x.id}</span>
+                          <span className="missed-card-code">{item ? fmtCodes(item.k.slice(0, 2)) : ""}</span>
+                          <span className="missed-card-count">錯 {x.n} 次</span>
+                        </button>
                       </div>
                     );
                   })}

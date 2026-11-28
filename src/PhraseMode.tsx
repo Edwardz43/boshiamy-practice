@@ -41,8 +41,11 @@ export default function PhraseMode(props: {
   reps: Record<string, string>;
   sheetOpen: boolean;
   soundOn?: boolean;
+  wordbook?: string[];
+  onToggleWordbook?: (ch: string) => void;
+  onLookupChar?: (ch: string) => void;
   onMiss: (ch: string) => void;
-  onAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onAttempt?: (info: { ch: string; correct: boolean; ms: number }) => void;
   onActiveChange?: (info: { code: string; hintOn: boolean; bad: boolean; typed: string }) => void;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
@@ -51,6 +54,7 @@ export default function PhraseMode(props: {
 }): JSX.Element {
   const { theme, isMobile, reps, soundOn } = props;
   const isTouch = useIsTouch();
+  const wordbookSet = useMemo(() => new Set(props.wordbook ?? []), [props.wordbook]);
 
   const [status, setStatus] = useState<Status>("loading");
   const [table, setTable] = useState<Table | null>(null);
@@ -169,7 +173,7 @@ export default function PhraseMode(props: {
 
     const res = gradePhraseChar(activeChar, code);
     setCharsTried((n) => n + 1);
-    props.onAttempt?.({ correct: res.ok, ms });
+    props.onAttempt?.({ ch: activeChar.c, correct: res.ok, ms });
     if (res.ok) {
       setCharsOk((n) => n + 1);
       advanceChar("ok");
@@ -419,6 +423,36 @@ export default function PhraseMode(props: {
               shownCodes={altCode ? [primaryCode, altCode] : [primaryCode]}
               compact={isMobile}
             />
+            {(props.onToggleWordbook || props.onLookupChar) ? (
+              <div className="drill-feedback-actions">
+                {props.onToggleWordbook ? (() => {
+                  const starred = wordbookSet.has(activeChar.c);
+                  return (
+                    <button
+                      type="button"
+                      className={"lookup-star-btn" + (starred ? " is-starred" : "")}
+                      data-testid="phrase-star-btn"
+                      data-char={activeChar.c}
+                      aria-pressed={starred}
+                      onClick={() => props.onToggleWordbook?.(activeChar.c)}
+                    >
+                      {starred ? "★ 已收藏" : "☆ 生字本"}
+                    </button>
+                  );
+                })() : null}
+                {props.onLookupChar ? (
+                  <button
+                    type="button"
+                    className="lookup-copy-btn"
+                    data-testid="phrase-lookup-btn"
+                    data-char={activeChar.c}
+                    onClick={() => props.onLookupChar?.(activeChar.c)}
+                  >
+                    查碼
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

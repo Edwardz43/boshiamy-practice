@@ -35,6 +35,13 @@ import {
   topWeakItems,
   dayTotals,
 } from "./historyLogic";
+import { buildKeyboardWeakness, QWERTY_ROWS, type HeatmapMode } from "./weaknessLogic";
+
+const KB_MODES: { v: HeatmapMode; label: string }[] = [
+  { v: "all", label: "綜合" },
+  { v: "roots", label: "字根" },
+  { v: "chars", label: "拆字" },
+];
 
 type RangeLen = 7 | 30;
 type Filter = DrillMode | "all";
@@ -57,7 +64,12 @@ export default function HistoryMode(props: {
   settings: BackupSettings;
   bests?: PersonalBests;
   wordbook?: string[];
+  reps?: Record<string, string>;
+  charPrimaryCode?: Record<string, string>;
   onStartWeakReview?: () => void;
+  onLookupChar?: (ch: string) => void;
+  onToggleWordbook?: (ch: string) => void;
+  onAddWordbookMany?: (chars: string[]) => void;
   onOpenSettings: () => void;
   onImport: (data: BackupFile, mode: ImportMode) => void;
   mobileModeStrip?: ReactNode;
@@ -67,6 +79,8 @@ export default function HistoryMode(props: {
   const { theme, isMobile, history } = props;
   const [range, setRange] = useState<RangeLen>(7);
   const [filter, setFilter] = useState<Filter>("all");
+  const [kbMode, setKbMode] = useState<HeatmapMode>("all");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pending, setPending] = useState<BackupFile | null>(null);
   const [msg, setMsg] = useState<string>("");
   const [err, setErr] = useState<string>("");
@@ -82,6 +96,18 @@ export default function HistoryMode(props: {
     () => topWeakItems(props.stats.missChars, props.stats.missRoots, 20),
     [props.stats.missChars, props.stats.missRoots],
   );
+  const wordbookSet = useMemo(() => new Set(props.wordbook ?? []), [props.wordbook]);
+  const kbWeak = useMemo(
+    () =>
+      buildKeyboardWeakness({
+        missChars: props.stats.missChars,
+        missRoots: props.stats.missRoots,
+        charPrimaryCode: props.charPrimaryCode ?? {},
+        mode: kbMode,
+      }),
+    [props.stats.missChars, props.stats.missRoots, props.charPrimaryCode, kbMode],
+  );
+  const totalKbScore = useMemo(() => Object.values(kbWeak).reduce((s, e) => s + e.score, 0), [kbWeak]);
   const tableDays = useMemo(() => recentDays(history, 30), [history]);
   const canShare = useMemo(() => canShareBackupFiles(), []);
 
@@ -349,23 +375,169 @@ export default function HistoryMode(props: {
     </div>
   );
 
+  const kbHeatmapBlock = (() => {
+    const sel = selectedKey ? kbWeak[selectedKey] : null;
+    const repText = selectedKey ? props.reps?.[selectedKey] ?? "" : "";
+    const showRoots = sel && kbMode !== "chars" ? sel.roots : [];
+    const showChars = sel && kbMode !== "roots" ? sel.chars : [];
+    return (
+      <div className="history-kb-card" data-testid="history-kb-heatmap">
+        <div className="history-kb-head">
+          <span style={{ ...theme.font.caption, color: theme.text.secondary, fontWeight: theme.weight.semibold }}>
+            26 鍵弱點熱區圖
+          </span>
+          <div className="history-kb-seg" role="group" aria-label="弱點熱區維度">
+            {KB_MODES.map((m) => (
+              <button
+                key={m.v}
+                type="button"
+                data-testid={"kb-hm-mode-" + m.v}
+                aria-pressed={kbMode === m.v}
+                className={"ui-pill" + (kbMode === m.v ? " is-on" : "")}
+                onClick={() => setKbMode(m.v)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <div className="history-heatmap-legend" aria-hidden="true">
+            <span>低</span>
+            {([0, 1, 2, 3, 4] as const).map((lv) => (
+              <span key={lv} className={"kb-hm-legend-cell is-lv" + lv} />
+            ))}
+            <span>高</span>
+          </div>
+        </div>
+        <div className="kb-hm-rows">
+          {QWERTY_ROWS.map((rowStr, rowIdx) => (
+            <div key={rowIdx} className={"kb-hm-row kb-hm-row-" + rowIdx}>
+              {Array.from(rowStr).map((k) => {
+                const entry = kbWeak[k];
+                const isSel = selectedKey === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    data-testid={"kb-hm-key-" + k}
+                    data-level={entry.level}
+                    aria-pressed={isSel}
+                    aria-label={k.toUpperCase() + " 鍵，累計失誤 " + entry.score + " 次"}
+                    className={"kb-hm-key is-lv" + entry.level + (isSel ? " is-selected" : "")}
+                    onClick={() => setSelectedKey((prev) => (prev === k ? null : k))}
+                  >
+                    <span className="kb-hm-letter">{k.toUpperCase()}</span>
+                    {entry.score > 0 ? <span className="kb-hm-score">{entry.score}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <div className="kb-hm-detail" data-testid="history-kb-detail">
+          {!selectedKey || !sel ? (
+            totalKbScore === 0 ? (
+              "目前沒有累積弱點紀錄，練幾題後這裡會顯示你的按鍵弱點分布。"
+            ) : (
+              "點選任一按鍵，查看該鍵的代表字根與常錯項目"
+            )
+          ) : (
+            <>
+              <div className="kb-hm-detail-head">
+                {selectedKey.toUpperCase()} 鍵{repText ? "（" + repText + "）" : ""} · 累計失誤 {sel.score} 次
+              </div>
+              {showRoots.length === 0 && showChars.length === 0 ? (
+                <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
+                  這個按鍵目前沒有累積失誤紀錄。
+                </p>
+              ) : (
+                <>
+                  {showRoots.length > 0 ? (
+                    <div className="kb-hm-detail-row">
+                      <span className="kb-hm-detail-label">常錯字根</span>
+                      {showRoots.map((r) => (
+                        <span key={r.glyph} className="kb-hm-detail-chip">
+                          {r.glyph} ×{r.count}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {showChars.length > 0 ? (
+                    <div className="kb-hm-detail-row">
+                      <span className="kb-hm-detail-label">常錯中文字</span>
+                      {showChars.map((ch) => (
+                        <span key={ch.c} className="kb-hm-char-pill">
+                          <button
+                            type="button"
+                            className="kb-hm-char-lookup"
+                            data-testid="kb-hm-char-lookup"
+                            data-char={ch.c}
+                            title={"查「" + ch.c + "」字碼"}
+                            onClick={() => props.onLookupChar?.(ch.c)}
+                          >
+                            <span>{ch.c}</span>
+                            <span className="kb-hm-char-code">{ch.code.toUpperCase()}</span>
+                            <span className="kb-hm-char-count">×{ch.count}</span>
+                          </button>
+                          {props.onToggleWordbook ? (
+                            <button
+                              type="button"
+                              className={"kb-hm-char-star" + (wordbookSet.has(ch.c) ? " is-starred" : "")}
+                              data-testid="kb-hm-char-star"
+                              data-char={ch.c}
+                              aria-pressed={wordbookSet.has(ch.c)}
+                              aria-label={(wordbookSet.has(ch.c) ? "移出生字本：" : "加入生字本：") + ch.c}
+                              onClick={() => props.onToggleWordbook?.(ch.c)}
+                            >
+                              {wordbookSet.has(ch.c) ? "★" : "☆"}
+                            </button>
+                          ) : null}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  })();
+
   const maxWeak = weakRank.length > 0 ? weakRank[0].count : 1;
+  const weakChars = weakRank.filter((x) => x.kind === "char").map((x) => x.glyph);
+  const unsavedWeakChars = weakChars.filter((c) => !wordbookSet.has(c));
   const weakRankBlock = (
     <div className="history-weak-card" data-testid="history-weak-rank">
       <div className="history-weak-head">
         <h3 style={{ ...theme.font.heading3, margin: 0, fontWeight: theme.weight.semibold }}>
           弱點字／字根排行{weakRank.length > 0 ? " Top " + weakRank.length : ""}
         </h3>
-        {weakRank.length > 0 && props.onStartWeakReview ? (
-          <button
-            type="button"
-            className="ui-btn ui-btn-primary"
-            data-testid="history-weak-cta"
-            style={{ minHeight: 34, padding: "4px 12px", fontSize: 13 }}
-            onClick={props.onStartWeakReview}
-          >
-            去複習弱點 →
-          </button>
+        {(weakChars.length > 0 && props.onAddWordbookMany) || (weakRank.length > 0 && props.onStartWeakReview) ? (
+          <div className="history-weak-actions">
+            {weakChars.length > 0 && props.onAddWordbookMany ? (
+              <button
+                type="button"
+                className="lookup-copy-btn"
+                data-testid="history-weak-star-all"
+                disabled={unsavedWeakChars.length === 0}
+                onClick={() => props.onAddWordbookMany?.(unsavedWeakChars)}
+              >
+                {unsavedWeakChars.length === 0 ? "★ 皆已收藏" : `☆ 弱點字加入生字本 (+${unsavedWeakChars.length})`}
+              </button>
+            ) : null}
+            {weakRank.length > 0 && props.onStartWeakReview ? (
+              <button
+                type="button"
+                className="ui-btn ui-btn-primary"
+                data-testid="history-weak-cta"
+                style={{ minHeight: 34, padding: "4px 12px", fontSize: 13 }}
+                onClick={props.onStartWeakReview}
+              >
+                去複習弱點 →
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
       {weakRank.length === 0 ? (
@@ -387,6 +559,34 @@ export default function HistoryMode(props: {
                   style={{ width: Math.max(12, Math.round((item.count / maxWeak) * 100)) + "%" }}
                 />
               </div>
+              {item.kind === "char" && (props.onLookupChar || props.onToggleWordbook) ? (
+                <div className="history-weak-item-actions">
+                  {props.onLookupChar ? (
+                    <button
+                      type="button"
+                      className="mini-lookup-btn"
+                      data-testid="weak-item-lookup"
+                      data-char={item.glyph}
+                      onClick={() => props.onLookupChar?.(item.glyph)}
+                    >
+                      查碼
+                    </button>
+                  ) : null}
+                  {props.onToggleWordbook ? (
+                    <button
+                      type="button"
+                      className={"mini-star-btn" + (wordbookSet.has(item.glyph) ? " is-starred" : "")}
+                      data-testid="weak-item-star"
+                      data-char={item.glyph}
+                      aria-pressed={wordbookSet.has(item.glyph)}
+                      aria-label={(wordbookSet.has(item.glyph) ? "移出生字本：" : "加入生字本：") + item.glyph}
+                      onClick={() => props.onToggleWordbook?.(item.glyph)}
+                    >
+                      {wordbookSet.has(item.glyph) ? "★" : "☆"}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -552,6 +752,7 @@ export default function HistoryMode(props: {
       {summary}
       {heatmapBlock}
       {charts}
+      {kbHeatmapBlock}
       {weakRankBlock}
       {table}
       {backupBlock}

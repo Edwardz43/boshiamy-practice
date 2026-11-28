@@ -32,6 +32,7 @@ node test-history.mjs
 node test-simplified.mjs
 node test-draw.mjs
 node test-wordbook-phrases.mjs
+node test-weakness.mjs
 
 # UI / CSP / RWD 測試（需先啟動上方 preview 伺服器）
 node test-csp.mjs
@@ -43,6 +44,7 @@ node test-theme-ui.mjs
 node test-simplified-ui.mjs
 node test-wordbook-phrases-ui.mjs
 node test-rwd-ui.mjs
+node test-weakness-ui.mjs
 
 # 重建繁簡字元對照表（由 data-src/ 產出 public/opencc-chars.json）
 node scripts/build-opencc.mjs
@@ -88,6 +90,7 @@ boshiamy-practice/
 │   ├── simplifiedData.ts       # 常用千字精選簡體拆碼對照表
 │   ├── simplifiedLogic.ts      # 簡體取碼提示查詢與字根拆解格式化（純函式）
 │   ├── wordbookLogic.ts        # 生字本（上限 500 字）驗證、增刪與合併（純函式）
+│   ├── weaknessLogic.ts        # 弱點消退（decayMissMap）與 26 鍵弱點熱區圖計算（純函式）
 │   ├── phraseLogic.ts          # 詞彙連打題庫（日常詞／成語／科技職場）與對表解析（純函式）
 │   ├── articleText.ts          # 維基百科文章擷取 URL、純文本清理與分字切段（純函式）
 │   ├── lookupLogic.ts          # 正查／反查、繁簡異體查詢與注音式 Ruby 標註（純函式）
@@ -172,8 +175,11 @@ boshiamy-practice/
 2. **查碼與生字本（`lookup`）**：
    - 自動辨識正查（輸入中文字，上限 400 字）與反查（輸入英文字碼，上限 12 組），支援注音式 Ruby 排版檢視與繁簡異體字一併查碼。
    - 可將字詞一鍵加入／移除**生字本**，並直接進入 `WordbookPractice` 針對個人生字進行專項練習。
-3. **學習紀錄與備份（`history`）**：
+   - **全站打通**：於常用字／簡碼／詞彙／文章答題回饋、文章結算錯字、紀錄頁弱點排行與熱區圖、桌機側邊欄常錯清單皆可直接收藏至生字本或一鍵跳轉查碼。
+3. **學習紀錄、弱點閉環與備份（`history`）**：
    - 今日進度條、連續練習天數（streak）、近 7／30 天趨勢圖表、12 週練習熱圖、個人最佳成績與常錯字／字根弱項排行。
+   - **弱點消退機制**：全練習模式（含限時挑戰與生字本複習）答對既有弱點字／字根時自動消退錯誤次數，歸零即移出弱點並顯示畢業回饋；複習錯字清空後顯示溫和完成提示。
+   - **26 鍵鍵盤弱點熱區圖**：以 QWERTY 三排鍵帽視覺化呈現 26 鍵失誤分布（支援綜合／字根／拆字切換），點選鍵帽可展開該鍵弱點字根與錯字並串接查碼與生字本。
    - JSON 備份匯出（支援瀏覽器下載與 Web Share API）與合併／覆蓋匯入。
 4. **外觀、音效與行動端體驗**：
    - 四套主題（文房墨綠、鍵盤工作室、晴朗練功、極簡）× 明暗模式切換。

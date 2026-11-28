@@ -32,11 +32,13 @@ export default function LookupMode(props: {
   soundOn?: boolean;
   sheetOpen?: boolean;
   startPracticeTick?: number;
+  prefillQuery?: string;
+  prefillTick?: number;
   onToggleWordbook?: (ch: string) => void;
   onAddWordbookMany?: (chars: string[]) => void;
   onRemoveWordbook?: (ch: string) => void;
   onClearWordbook?: () => void;
-  onWordbookAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onWordbookAttempt?: (info: { ch: string; correct: boolean; ms: number }) => void;
   onOpenSettings: () => void;
   mobileModeStrip?: ReactNode;
   mobileTodayBar?: ReactNode;
@@ -58,6 +60,7 @@ export default function LookupMode(props: {
   const composing = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastPracticeTick = useRef<number>(props.startPracticeTick ?? 0);
+  const lastPrefillTick = useRef<number>(0);
 
   useEffect(() => {
     const tick = props.startPracticeTick ?? 0;
@@ -66,6 +69,17 @@ export default function LookupMode(props: {
       setPracticing(true);
     }
   }, [props.startPracticeTick, wordbook.length]);
+
+  useEffect(() => {
+    const tick = props.prefillTick ?? 0;
+    const text = (props.prefillQuery ?? "").trim();
+    if (tick > lastPrefillTick.current && text) {
+      lastPrefillTick.current = tick;
+      setPracticing(false);
+      setValue(text);
+      setQuery(text);
+    }
+  }, [props.prefillTick, props.prefillQuery]);
 
   function copyCode(text: string, key: string): void {
     if (!text) return;

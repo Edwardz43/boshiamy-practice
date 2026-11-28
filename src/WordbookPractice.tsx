@@ -37,7 +37,7 @@ export function WordbookPractice(props: {
   autoNext: boolean;
   soundOn: boolean;
   sheetOpen?: boolean;
-  onAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onAttempt?: (info: { ch: string; correct: boolean; ms: number }) => void;
   onRemoveWordbook: (ch: string) => void;
   onBack: () => void;
   onOpenSettings: () => void;
@@ -123,7 +123,7 @@ export function WordbookPractice(props: {
     setAnimTick((n) => n + 1);
     setSessionTried((n) => n + 1);
     if (ok) setSessionOk((n) => n + 1);
-    props.onAttempt?.({ correct: ok, ms });
+    props.onAttempt?.({ ch: cur.c, correct: ok, ms });
     if (ok && autoNext) {
       clearAutoNext();
       autoNextRef.current = window.setTimeout(() => {

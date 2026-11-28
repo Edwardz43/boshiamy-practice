@@ -48,8 +48,12 @@ export default function ArticleMode(props: {
   reps: Record<string, string>;
   sheetOpen: boolean;
   bestCpm?: number;
+  wordbook?: string[];
+  onToggleWordbook?: (ch: string) => void;
+  onAddWordbookMany?: (chars: string[]) => void;
+  onLookupChar?: (ch: string) => void;
   onMiss: (ch: string) => void;
-  onAttempt?: (info: { correct: boolean; ms: number }) => void;
+  onAttempt?: (info: { ch: string; correct: boolean; ms: number }) => void;
   onFinish?: (info: { cpm: number; accuracy: number }) => void;
   onActiveChange?: (info: { code: string; hintOn: boolean; bad: boolean; typed: string }) => void;
   onOpenSettings: () => void;
@@ -59,6 +63,7 @@ export default function ArticleMode(props: {
 }): JSX.Element {
   const { theme, isMobile } = props;
   const isTouch = useIsTouch();
+  const wordbookSet = useMemo(() => new Set(props.wordbook ?? []), [props.wordbook]);
   const [status, setStatus] = useState<Status>("loading");
   const [errMsg, setErrMsg] = useState<string>("");
   const [art, setArt] = useState<Article | null>(null);
@@ -208,9 +213,10 @@ export default function ArticleMode(props: {
     const started = lastMarkAt.current ?? now;
     const ms = Math.min(5 * 60 * 1000, Math.max(0, now - started));
     lastMarkAt.current = now;
+    const ch = art.segs[idx]?.c ?? "";
     const alreadyBad = marks[idx] === "bad";
     const correct = mark === "ok" && !alreadyBad;
-    props.onAttempt?.({ correct, ms });
+    props.onAttempt?.({ ch, correct, ms });
     setMarks((m) => ({ ...m, [idx]: m[idx] === "bad" ? "bad" : mark }));
     setTyped("");
     setHintOn(false);
@@ -420,6 +426,36 @@ export default function ArticleMode(props: {
             shownCodes={cur.k[0] ? [cur.k[0]] : []}
             compact={isMobile}
           />
+          {(props.onToggleWordbook || props.onLookupChar) ? (
+            <div className="drill-feedback-actions">
+              {props.onToggleWordbook ? (() => {
+                const starred = wordbookSet.has(cur.c);
+                return (
+                  <button
+                    type="button"
+                    className={"lookup-star-btn" + (starred ? " is-starred" : "")}
+                    data-testid="article-star-btn"
+                    data-char={cur.c}
+                    aria-pressed={starred}
+                    onClick={() => props.onToggleWordbook?.(cur.c)}
+                  >
+                    {starred ? "★ 已收藏" : "☆ 生字本"}
+                  </button>
+                );
+              })() : null}
+              {props.onLookupChar ? (
+                <button
+                  type="button"
+                  className="lookup-copy-btn"
+                  data-testid="article-lookup-btn"
+                  data-char={cur.c}
+                  onClick={() => props.onLookupChar?.(cur.c)}
+                >
+                  查碼
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : hintOn ? (
         <p className="mobile-msg" style={{ color: theme.text.accent, fontWeight: theme.weight.semibold, margin: 0 }}>
@@ -502,18 +538,54 @@ export default function ArticleMode(props: {
         </div>
         {missed.length ? (
           <div style={{ width: "100%" }}>
-            <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: "0 0 6px" }}>
-              這篇打錯或跳過的字（共 {missed.length} 字）
-            </p>
+            <div className="article-missed-head">
+              <p style={{ ...theme.font.caption, color: theme.text.tertiary, margin: 0 }}>
+                這篇打錯或跳過的字（共 {missed.length} 字{props.onLookupChar ? "，點字可查碼" : ""}）
+              </p>
+              {props.onAddWordbookMany ? (() => {
+                const unsaved = missed.map((x) => x.c).filter((c) => !wordbookSet.has(c));
+                return (
+                  <button
+                    type="button"
+                    className="lookup-copy-btn"
+                    data-testid="article-star-all"
+                    disabled={unsaved.length === 0}
+                    onClick={() => props.onAddWordbookMany?.(unsaved)}
+                  >
+                    {unsaved.length === 0 ? "★ 皆已收藏" : `☆ 錯字全部加入生字本 (+${unsaved.length})`}
+                  </button>
+                );
+              })() : null}
+            </div>
             <ul className="article-missed">
-              {missed.map((x) => (
-                <li key={x.c} className="article-missed-item" style={{ borderColor: theme.border.default }}>
-                  <span className="article-missed-char">{x.c}</span>
-                  <span className="article-missed-code" style={{ color: theme.text.accent }}>
-                    {fmt(x.k.slice(0, 2))}
-                  </span>
-                </li>
-              ))}
+              {missed.map((x) => {
+                const inner = (
+                  <>
+                    <span className="article-missed-char">{x.c}</span>
+                    <span className="article-missed-code" style={{ color: theme.text.accent }}>
+                      {fmt(x.k.slice(0, 2))}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={x.c} className="article-missed-item" style={{ borderColor: theme.border.default }}>
+                    {props.onLookupChar ? (
+                      <button
+                        type="button"
+                        className="article-missed-btn"
+                        data-testid="article-missed-lookup"
+                        data-char={x.c}
+                        title={"查「" + x.c + "」字碼"}
+                        onClick={() => props.onLookupChar?.(x.c)}
+                      >
+                        {inner}
+                      </button>
+                    ) : (
+                      inner
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ) : (
